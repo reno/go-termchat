@@ -1,0 +1,127 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - revive
+    - sloglint
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    exhaustive:
+      # A proto oneof or message kind gaining a case must break the switch loudly.
+      default-signifies-exhaustive: false
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        # "no logs" applies to us too — structured slog only (AGENTS.md §6).
+        - pattern: '^fmt\.Print.*$'
+          msg: use log/slog, not stdout
+        - pattern: '^print(ln)?$'
+          msg: use log/slog, not the builtin print
+        - pattern: '^log\.(Print|Fatal|Panic).*$'
+          msg: use log/slog, not the legacy log package
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    revive:
+      rules:
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+        - name: var-naming
+
+    sloglint:
+      no-global: all
+      context: scope
+      static-msg: true
+      key-naming-case: snake
+      forbidden-keys:
+        # Never log an identity or a message body (AGENTS.md §6, §8).
+        - session_id
+        - nick
+        - body
+        - message
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - gen/
+    rules:
+      - path: _test\.go$
+        linters:
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/reno/go-termchat
+  exclusions:
+    generated: lax
+    paths:
+      - gen/
