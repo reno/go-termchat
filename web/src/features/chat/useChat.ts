@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SessionClients } from "@/lib/clients";
+import {
+  clearChannelCache,
+  queuedCount,
+  loadChannels,
+  loadMessages,
+  saveChannels,
+  saveMessages,
+  saveSession,
+} from "@/lib/db";
 import { newClientId } from "@/lib/id";
+import { flush, isOnline, onOnline, queue } from "@/lib/outbox";
+import { UPDATE_AVAILABLE, watchForUpdates } from "@/lib/updates";
 
 import { applyTheme, helpText, mentionDraft, parseCommand } from "./commands";
 import type { MessageView } from "./model";
@@ -13,6 +24,16 @@ export const DEFAULT_CHANNEL = "?teste";
 export const SEND_FAILED = "message failed to send. press up and send it again.";
 export const DM_UNDELIVERED = "not delivered — that nick is not connected.";
 export const WINDOW_TRUNCATED = "[older messages were forgotten]";
+export const OFFLINE = "[offline]";
+export const BACK_ONLINE = "[online]";
+
+export function queuedLine(count: number): string {
+  return `[${String(count)} queued]`;
+}
+
+export function reconnectingLine(seconds: number): string {
+  return `[reconnecting in ${String(seconds)}s]`;
+}
 
 function nickChanged(nick: string): string {
   return `you are now ${nick}`;
@@ -25,6 +46,7 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
   const typing = useRef(false);
   const cursors = useRef(new Map<string, string>());
   const loading = useRef(false);
+  const [online, setOnline] = useState(true);
 
   const { setMe, setActive, upsertChannel, setMembers, systemLine, applyEvent } = store;
 
@@ -86,34 +108,145 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
     if (me === null) {
       return;
     }
-    void openChannel(DEFAULT_CHANNEL);
-  }, [me, openChannel]);
+    void (async () => {
+      try {
+        const cached = await loadChannels();
+        if (cached.length > 0) {
+          useChatStore.getState().setChannels(cached);
+          for (const channel of cached) {
+            useChatStore.getState().prependMessages(channel.id, await loadMessages(channel.id));
+          }
+          const first = cached[0];
+          if (first !== undefined && useChatStore.getState().activeId === null) {
+            setActive(first.id);
+          }
+        }
+        await saveSession(me);
+      } catch {
+        // A cache that will not open costs a slower first paint, nothing else.
+      }
+      await openChannel(DEFAULT_CHANNEL);
+    })();
+  }, [me, openChannel, setActive]);
 
   useEffect(() => {
     if (me === null) {
       return;
     }
     const controller = new AbortController();
+    const stopped = { value: false };
+    const isStopped = () => stopped.value;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    void (async () => {
-      try {
-        for await (const frame of clients.chat.streamEvents(
-          { lastEventId: "" },
-          { signal: controller.signal },
-        )) {
-          if (frame.event !== undefined) {
-            applyEvent(frame.event);
+    const notify = (body: string) => {
+      const target = useChatStore.getState().activeId;
+      if (target !== null) {
+        systemLine(target, body);
+      }
+    };
+
+    const run = async () => {
+      while (!isStopped()) {
+        try {
+          for await (const frame of clients.chat.streamEvents(
+            { lastEventId: useChatStore.getState().lastEventId },
+            { signal: controller.signal },
+          )) {
+            attempt = 0;
+            if (frame.event !== undefined) {
+              applyEvent(frame.event);
+            }
+          }
+        } catch {
+          if (isStopped()) {
+            return;
           }
         }
-      } catch {
-        // The transport retries; a closed stream is not an error the transcript reports.
+
+        if (isStopped()) {
+          return;
+        }
+
+        attempt += 1;
+        const seconds = Math.min(2 ** attempt, 30);
+        notify(reconnectingLine(seconds));
+
+        await new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, seconds * 1000);
+        });
       }
-    })();
+    };
+
+    void run();
 
     return () => {
+      stopped.value = true;
       controller.abort();
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     };
-  }, [clients, me, applyEvent]);
+  }, [clients, me, applyEvent, systemLine]);
+
+  useEffect(() => {
+    const drain = () => {
+      setOnline(true);
+      void (async () => {
+        const delivered = await flush(async (entry) => {
+          await clients.chat.sendMessage({
+            channelId: entry.channelId,
+            clientMessageId: entry.clientMessageId,
+            body: entry.body,
+            kind: entry.kind === "action" ? ProtoKind.ACTION : ProtoKind.NORMAL,
+          });
+        });
+        const target = useChatStore.getState().activeId;
+        if (target !== null && delivered > 0) {
+          systemLine(target, BACK_ONLINE);
+        }
+      })();
+    };
+
+    const dropped = () => {
+      setOnline(false);
+      const target = useChatStore.getState().activeId;
+      if (target !== null) {
+        systemLine(target, OFFLINE);
+      }
+    };
+
+    globalThis.addEventListener("offline", dropped);
+    const stopOnline = onOnline(drain);
+
+    if (isOnline()) {
+      drain();
+    }
+
+    return () => {
+      globalThis.removeEventListener("offline", dropped);
+      stopOnline();
+    };
+  }, [clients, systemLine]);
+
+  useEffect(() => {
+    const unsubscribe = useChatStore.subscribe((state) => {
+      void saveChannels(state.channels).catch(() => undefined);
+      for (const [channelId, lines] of Object.entries(state.messages)) {
+        void saveMessages(channelId, lines).catch(() => undefined);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    return watchForUpdates(() => {
+      const target = useChatStore.getState().activeId;
+      if (target !== null) {
+        systemLine(target, UPDATE_AVAILABLE);
+      }
+    });
+  }, [systemLine]);
 
   const send = useCallback(async () => {
     const parsed = parseCommand(draft);
@@ -133,6 +266,7 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
 
       case "clear":
         useChatStore.getState().clearChannel(activeId);
+        void clearChannelCache(activeId).catch(() => undefined);
         return;
 
       case "theme":
@@ -215,8 +349,20 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
             });
           }
         } catch {
-          useChatStore.getState().markFailed(clientId);
-          systemLine(activeId, SEND_FAILED);
+          if (isOnline()) {
+            useChatStore.getState().markFailed(clientId);
+            systemLine(activeId, SEND_FAILED);
+            return;
+          }
+          await queue({
+            clientMessageId: clientId,
+            channelId: activeId,
+            body,
+            kind,
+            queuedAt: Date.now(),
+          });
+          const depth = await queuedCount();
+          systemLine(activeId, queuedLine(depth));
         }
       }
     }
@@ -294,5 +440,15 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
     [setActive],
   );
 
-  return { draft, setDraft, send, mention, selectChannel, setTyping, openChannel, loadOlder };
+  return {
+    draft,
+    setDraft,
+    send,
+    mention,
+    selectChannel,
+    setTyping,
+    openChannel,
+    loadOlder,
+    online,
+  };
 }

@@ -14,6 +14,12 @@ if (container === null) {
 
 const clients = createClients(createTransport({ baseUrl: window.location.origin }));
 
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  globalThis.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js", { type: "module" });
+  });
+}
+
 createRoot(container).render(
   <StrictMode>
     <App clients={clients} />

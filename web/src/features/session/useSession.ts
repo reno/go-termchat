@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SessionClients } from "@/lib/clients";
+import { clearCache } from "@/lib/db";
 import { forgetNick, isUnauthenticated, reasonOf, rememberNick } from "@/lib/transport";
 import { ErrorReason } from "@gen/chat/v1/chat_pb";
 
@@ -62,6 +63,9 @@ export function useSession(clients: SessionClients) {
         if (!live.current) {
           return;
         }
+        if (isUnauthenticated(error)) {
+          void clearCache().catch(() => undefined);
+        }
         forgetNick();
         setState({
           phase: "anonymous",
@@ -97,6 +101,7 @@ export function useSession(clients: SessionClients) {
     try {
       await clients.sessions.leave({});
     } finally {
+      await clearCache().catch(() => undefined);
       forgetNick();
       if (live.current) {
         setState({ phase: "anonymous", nick: null, notice: null, busy: false });
@@ -105,6 +110,7 @@ export function useSession(clients: SessionClients) {
   }, [clients]);
 
   const sessionLost = useCallback(() => {
+    void clearCache().catch(() => undefined);
     forgetNick();
     if (live.current) {
       setState({ phase: "anonymous", nick: null, notice: SESSION_LOST_MESSAGE, busy: false });
