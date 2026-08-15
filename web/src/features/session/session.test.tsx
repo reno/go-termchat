@@ -10,6 +10,14 @@ import { ErrorDetailSchema, ErrorReason } from "@gen/chat/v1/chat_pb";
 
 import { NICK_TAKEN_MESSAGE } from "./useSession";
 
+function quietStream(): AsyncIterable<never> {
+  return {
+    [Symbol.asyncIterator]: () => ({
+      next: () => Promise.resolve({ done: true as const, value: undefined as never }),
+    }),
+  };
+}
+
 function sessionOf(nick: string) {
   return { session: { nick, $typeName: "chat.v1.Session" } } as never;
 }
@@ -32,7 +40,17 @@ function clientsWith(overrides: {
       setNick: vi.fn(),
       leave: vi.fn(),
     },
-    chat: {},
+    chat: {
+      joinChannel: () =>
+        Promise.resolve({ channel: { id: "c1", name: "?teste", memberCount: 1 }, created: false }),
+      listMessages: () => Promise.resolve({ messages: [], windowTruncated: false }),
+      listMembers: () => Promise.resolve({ members: [] }),
+      listChannels: () => Promise.resolve({ channels: [] }),
+      sendMessage: () => Promise.resolve({ message: undefined, deduplicated: false }),
+      sendDirectMessage: () => Promise.resolve({ message: undefined, delivered: true }),
+      setTyping: () => Promise.resolve({}),
+      streamEvents: () => quietStream(),
+    },
   } as unknown as SessionClients;
 }
 
@@ -49,7 +67,7 @@ describe("boot", () => {
     expect(screen.getByRole("status", { name: "connecting" })).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText("rill")).toBeInTheDocument();
+      expect(screen.getByRole("log", { name: "transcript" })).toBeInTheDocument();
     });
     expect(screen.queryByLabelText("nick")).not.toBeInTheDocument();
     expect(rememberedNick()).toBe("rill");
@@ -61,7 +79,7 @@ describe("boot", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("nick")).toBeInTheDocument();
     });
-    expect(screen.getByText("pick a nick to start.")).toBeInTheDocument();
+    expect(screen.getByText(/pick a nick to start\./)).toBeInTheDocument();
   });
 
   it("reports a server it cannot reach rather than showing an empty prompt", async () => {
@@ -81,7 +99,7 @@ describe("join", () => {
 
     await screen.findByLabelText("nick");
 
-    expect(screen.getByText("termchat")).toBeInTheDocument();
+    expect(screen.getByText(/termchat/)).toBeInTheDocument();
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/register/i)).not.toBeInTheDocument();
@@ -104,7 +122,7 @@ describe("join", () => {
     await user.click(screen.getByRole("button", { name: "join" }));
 
     await waitFor(() => {
-      expect(screen.getByText("rill")).toBeInTheDocument();
+      expect(screen.getByRole("log", { name: "transcript" })).toBeInTheDocument();
     });
     expect(rememberedNick()).toBe("rill");
   });
@@ -152,7 +170,7 @@ describe("join", () => {
     await user.type(await screen.findByLabelText("nick"), "rill{Enter}");
 
     await waitFor(() => {
-      expect(screen.getByText("rill")).toBeInTheDocument();
+      expect(screen.getByRole("log", { name: "transcript" })).toBeInTheDocument();
     });
   });
 });

@@ -1,4 +1,6 @@
-import { Line, Pane, Spinner, StatusBar } from "@/components/term";
+import { Line, Pane, Spinner } from "@/components/term";
+import { Chat } from "@/features/chat/Chat";
+import { useChatStore } from "@/features/chat/store";
 import { JoinPrompt } from "@/features/session/JoinPrompt";
 import { useSession } from "@/features/session/useSession";
 import type { SessionClients } from "@/lib/clients";
@@ -8,7 +10,8 @@ export interface AppProps {
 }
 
 export function App({ clients }: AppProps) {
-  const { state, join } = useSession(clients);
+  const { state, join, leave } = useSession(clients);
+  const reset = useChatStore((store) => store.reset);
 
   if (state.phase === "resuming") {
     return (
@@ -22,21 +25,18 @@ export function App({ clients }: AppProps) {
     );
   }
 
-  if (state.phase === "anonymous") {
+  if (state.phase === "anonymous" || state.nick === null) {
     return <JoinPrompt onJoin={join} notice={state.notice} busy={state.busy} />;
   }
 
   return (
-    <div className="app">
-      <StatusBar label="channel status">
-        <span className="app__nick">{state.nick}</span>
-        <span className="app__tagline">termchat</span>
-      </StatusBar>
-      <Pane scroll label="transcript" live>
-        <Line nick="*" variant="system">
-          joined as {state.nick}. the chat UI lands in M7.
-        </Line>
-      </Pane>
-    </div>
+    <Chat
+      clients={clients}
+      me={state.nick}
+      onLeave={() => {
+        reset();
+        void leave();
+      }}
+    />
   );
 }

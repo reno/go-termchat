@@ -34,7 +34,7 @@ export interface LineProps {
   children: ReactNode;
   variant?: LineVariant;
   state?: LineState;
-  nickColor?: string;
+  nickColor?: string | undefined;
 }
 
 export function Line({ nick, children, variant = "normal", state = "sent", nickColor }: LineProps) {
