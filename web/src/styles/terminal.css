@@ -1,0 +1,161 @@
+:root {
+  --bg-app: #16161a;
+  --bg-chrome: #1b1b20;
+  --bg-panel: #1a1a1e;
+  --bg-hint: #191a1f;
+  --bg-raised: #23232a;
+  --scrim: rgba(10, 10, 12, 0.6);
+  --border: #26262c;
+  --border-control: #2e2e36;
+
+  --fg: #d6d6d2;
+  --fg-channel: #9a9aa3;
+  --fg-muted: #85858e;
+  --fg-action: #8d8d96;
+  --fg-system: #6d6d76;
+  --fg-dim: #56565e;
+  --fg-faint: #45454d;
+  --fg-placeholder: #4a4a52;
+
+  --fg-system-content: var(--fg-muted);
+  --fg-dim-content: var(--fg-muted);
+  --fg-faint-content: var(--fg-muted);
+  --fg-placeholder-content: var(--fg-muted);
+  --fg-faint-content-raised: var(--fg-channel);
+
+  --accent-green: #7fb8a4;
+  --accent-amber: #e0b080;
+  --accent-blue: #8fb4dc;
+  --accent-violet: #c8a2d8;
+  --accent: var(--accent-green);
+  --accent-bright: #a8dcc7;
+  --accent-on: #16161a;
+
+  --nick-1: #c8a2d8;
+  --nick-2: #e0b080;
+  --nick-3: #7fb8a4;
+  --nick-4: #8fb4dc;
+  --nick-5: #d89a9a;
+  --nick-6: #b8c47a;
+  --dm-nick: #c8a2d8;
+  --dm-body: #b79ac4;
+
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --fs-100: 11px;
+  --fs-200: 12px;
+  --fs-300: 13px;
+  --fs-400: 14px;
+  --fs-500: 15px;
+  --lh: 1.55;
+  --lh-input: 1.5;
+  --lh-loose: 1.7;
+  --fw-bold: 700;
+  --tracking-label: 0.12em;
+
+  --radius: 3px;
+  --panel-w: 210px;
+  --drawer-w: 240px;
+  --touch: 44px;
+  --row-channel: 36px;
+  --composer-max: 120px;
+  --bp-narrow: 640px;
+  --shadow-drawer: 0 0 40px rgba(0, 0, 0, 0.5);
+  --z-scrim: 5;
+  --z-drawer: 6;
+
+  --pad-header: 10px 14px;
+  --gap-header: 10px;
+  --pad-transcript: 16px 16px 20px;
+  --gap-message: 9px;
+  --gap-msg-cols: 4px 10px;
+  --pad-hint: 8px 14px;
+  --gap-hint: 6px 14px;
+  --pad-composer: 10px 12px;
+  --gap-composer: 10px;
+  --pad-textarea: 8px 10px;
+  --pad-panel: 14px 14px 18px;
+  --gap-panel: 10px;
+  --gap-channels: 2px;
+  --pad-channel: 8px;
+  --gap-roster: 7px;
+  --pad-roster: 2px 0;
+  --pad-btn-menu: 6px 10px;
+  --pad-btn-send: 0 16px;
+  --pad-prompt-top: 8px;
+
+  --focus-ring: 2px;
+  --focus-offset: 2px;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="amber"] {
+  --accent: var(--accent-amber);
+}
+
+:root[data-theme="blue"] {
+  --accent: var(--accent-blue);
+}
+
+:root[data-theme="violet"] {
+  --accent: var(--accent-violet);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-400);
+  line-height: var(--lh);
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-on);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-bright);
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+textarea {
+  font: inherit;
+}

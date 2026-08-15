@@ -1,5 +1,3 @@
-// Anonymous, ephemeral sessions.
-//
 // There are no accounts here, so there is nothing to register, log in to, or refresh. A
 // session is a short-lived, revocable handle that exists only to say "this connection is
 // the one holding that nick". It confers no privileges and outlives nothing.
