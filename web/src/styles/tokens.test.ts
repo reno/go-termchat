@@ -1,13 +1,40 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 const webRoot = process.cwd();
-const repoRoot = resolve(webRoot, "..");
 
 const terminalCss = readFileSync(join(webRoot, "src/styles/terminal.css"), "utf8");
-const designSpec = readFileSync(join(repoRoot, "design/README.md"), "utf8");
+
+const DESIGN_PALETTE = new Set([
+  "#16161a",
+  "#1b1b20",
+  "#1a1a1e",
+  "#191a1f",
+  "#23232a",
+  "#26262c",
+  "#2e2e36",
+
+  "#d6d6d2",
+  "#9a9aa3",
+  "#85858e",
+  "#8d8d96",
+  "#6d6d76",
+  "#56565e",
+  "#45454d",
+  "#4a4a52",
+
+  "#7fb8a4",
+  "#e0b080",
+  "#8fb4dc",
+  "#c8a2d8",
+  "#a8dcc7",
+
+  "#d89a9a",
+  "#b8c47a",
+  "#b79ac4",
+]);
 
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 const PX_FONT_SIZE = /font-size:\s*\d+(\.\d+)?px/g;
@@ -38,11 +65,11 @@ function sourceFiles(): string[] {
 }
 
 describe("design tokens", () => {
-  it("invents no colour: every hex in terminal.css appears in design/README.md", () => {
+  it("invents no colour: every hex in terminal.css is a design palette value", () => {
     const hexes: string[] = [...new Set<string>(terminalCss.match(HEX) ?? [])];
     expect(hexes.length).toBeGreaterThan(0);
 
-    const missing = hexes.filter((hex) => !designSpec.toLowerCase().includes(hex.toLowerCase()));
+    const missing = hexes.filter((hex) => !DESIGN_PALETTE.has(hex.toLowerCase()));
     expect(missing).toEqual([]);
   });
 
