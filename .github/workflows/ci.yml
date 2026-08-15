@@ -1,0 +1,101 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  BUF_VERSION: 1.72.0
+  GOLANGCI_VERSION: v2.12.2
+
+jobs:
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: ${{ env.BUF_VERSION }}
+          setup_only: true
+      - run: buf lint
+      - name: buf breaking against main
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main"
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_VERSION }}
+      - run: go test ./... -race -count=1
+      - run: go build ./...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run format
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm run test
+      - run: pnpm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - run: make build
+      - run: pnpm exec playwright test
+        working-directory: web
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/test-results
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: termchat:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

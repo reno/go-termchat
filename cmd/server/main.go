@@ -3,23 +3,35 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/reno/go-termchat/internal/chat"
 	"github.com/reno/go-termchat/internal/config"
 	"github.com/reno/go-termchat/internal/hub"
+	"github.com/reno/go-termchat/internal/observability"
 	"github.com/reno/go-termchat/internal/rpc"
 	"github.com/reno/go-termchat/internal/session"
 	"github.com/reno/go-termchat/internal/store"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := observability.NewLogger(os.Stdout, slog.LevelInfo)
+
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		if err := healthcheck(os.Getenv); err != nil {
+			log.Error("healthcheck failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(context.Background(), log, os.Getenv); err != nil {
 		log.Error("server stopped", slog.String("error", err.Error()))
@@ -73,12 +85,25 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 	go func() { swept <- sweeper.Run(ctx) }()
 	go expireTyping(ctx, memory, events, ids, cfg.TypingTTL)
 
-	handler := rpc.CORS(cfg.CORSOrigins, rpc.NewMux(rpc.Services{
+	metrics := observability.NewMetrics()
+	draining := &atomic.Bool{}
+
+	mux := rpc.NewMux(rpc.Services{
 		Sessions: rpc.NewSessionHandler(manager),
 		Chat: rpc.NewChatHandler(memory, events, rules, limiter, ids, cfg.TypingTTL,
 			rpc.WithKeepalive(cfg.Keepalive)),
-		Manager: manager,
-	}))
+		Manager:   manager,
+		Telemetry: observability.Interceptor(log, metrics),
+	})
+
+	observability.Register(mux, func() bool { return !draining.Load() }, metrics)
+
+	if assets, ok := webAssets(); ok {
+		mux.Handle("/", rpc.Static(assets))
+		log.InfoContext(ctx, "serving the embedded web build")
+	}
+
+	handler := rpc.CORS(cfg.CORSOrigins, mux)
 
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
@@ -89,6 +114,8 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 		Handler:           handler,
 		Protocols:         protocols,
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	listening := make(chan error, 1)
@@ -115,6 +142,7 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 	shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownGrace)
 	defer cancel()
 
+	draining.Store(true)
 	log.InfoContext(shutdown, "shutting down")
 	if err := server.Shutdown(shutdown); err != nil {
 		return err
@@ -164,4 +192,35 @@ func expireTyping(
 			}
 		}
 	}
+}
+
+func healthcheck(getenv func(string) string) error {
+	addr := getenv("TERMCHAT_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, "http://"+addr+observability.ReadyPath, http.NoBody,
+	)
+	if err != nil {
+		return err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthcheck: %s returned %d", observability.ReadyPath, res.StatusCode)
+	}
+	return nil
 }

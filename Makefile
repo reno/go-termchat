@@ -20,7 +20,7 @@ HAS_WEB_SRC := $(shell find $(WEB)/src -name '*.ts*' -print -quit 2>/dev/null)
 HAS_WEB_APP := $(wildcard $(WEB)/index.html)
 HAS_E2E     := $(shell find e2e -name '*.ts' -print -quit 2>/dev/null)
 
-.PHONY: help setup gen lint lint-proto lint-go lint-web fmt test test-go test-web e2e dev build build-go build-web check clean
+.PHONY: help setup gen lint lint-proto lint-go lint-web fmt test test-go test-web e2e dev build build-go build-web docker check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -93,7 +93,7 @@ else
 	cd $(WEB) && $(PNPM) run test
 endif
 
-e2e: ## Playwright
+e2e: build ## Playwright
 ifeq ($(HAS_E2E),)
 	@echo "e2e: no e2e/ yet — skipped"
 else
@@ -110,7 +110,7 @@ else
 	wait
 endif
 
-build: build-go build-web ## server binary into bin/ + web production build into web/dist
+build: build-web build-go ## web production build into web/dist, embedded into the bin/ server
 
 build-go:
 ifneq ($(HAS_GO),)
@@ -119,6 +119,11 @@ endif
 ifeq ($(HAS_SERVER),)
 	@echo "build-go: no cmd/server yet — binary skipped"
 else
+ifneq ($(HAS_WEB_APP),)
+	rm -rf cmd/server/dist
+	cp -R $(WEB)/dist cmd/server/dist
+	cp cmd/server/placeholder.txt cmd/server/dist/placeholder.txt
+endif
 	go build -o bin/server ./cmd/server
 endif
 
@@ -132,5 +137,11 @@ endif
 check: lint test build ## THE GATE. Green before any commit.
 	@echo "check: ok"
 
+docker: ## Build the container image
+	docker build -t termchat:local .
+
 clean: ## Remove build output
 	rm -rf bin $(WEB)/dist $(WEB)/dev-dist
+	rm -rf cmd/server/dist
+	mkdir -p cmd/server/dist
+	cp cmd/server/placeholder.txt cmd/server/dist/placeholder.txt

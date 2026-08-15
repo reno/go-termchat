@@ -1,0 +1,8 @@
+`make build` replaces this directory with web/dist before compiling the binary.
+
+It is committed so that //go:embed always has an embeddable file to read: with an empty
+directory the cmd/server package does not compile, and `make check` would fail on a clean
+clone before `make build` ever ran.
+
+The server checks for index.html at startup and serves the API alone when it is absent, so
+this placeholder is never mistaken for a web build.

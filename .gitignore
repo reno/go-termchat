@@ -28,6 +28,9 @@ go.work.sum
 # env file
 .env
 
+cmd/server/dist/*
+!cmd/server/dist/placeholder.txt
+
 # Node / web
 node_modules/
 web/dist/
@@ -36,6 +39,8 @@ web/dev-dist/
 *.tsbuildinfo
 
 # Playwright
+web/test-results/
+web/playwright-report/
 e2e/test-results/
 e2e/playwright-report/
 playwright/.cache/
