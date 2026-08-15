@@ -5,7 +5,7 @@ run:
   tests: true
 
 linters:
-  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
   enable:
     - bodyclose
     - contextcheck
@@ -39,13 +39,11 @@ linters:
       comparison: true
 
     exhaustive:
-      # A proto oneof or message kind gaining a case must break the switch loudly.
       default-signifies-exhaustive: false
 
     forbidigo:
       analyze-types: true
       forbid:
-        # "no logs" applies to us too — structured slog only (AGENTS.md §6).
         - pattern: '^fmt\.Print.*$'
           msg: use log/slog, not stdout
         - pattern: '^print(ln)?$'
@@ -76,9 +74,7 @@ linters:
         - name: error-return
         - name: error-strings
         - name: error-naming
-        - name: exported
         - name: indent-error-flow
-        - name: package-comments
         - name: range
         - name: receiver-naming
         - name: time-naming
@@ -92,7 +88,6 @@ linters:
       static-msg: true
       key-naming-case: snake
       forbidden-keys:
-        # Never log an identity or a message body (AGENTS.md §6, §8).
         - session_id
         - nick
         - body

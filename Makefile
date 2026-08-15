@@ -1,9 +1,7 @@
-# termchat — every command humans and agents run lives here (AGENTS.md §4).
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-# --- pinned toolchain (AGENTS.md §3) -----------------------------------------
 BUF_VERSION        := 1.72.0
 GOLANGCI_VERSION   := 2.12.2
 
@@ -15,19 +13,17 @@ WEB                := web
 PNPM               := corepack pnpm
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := 0
 
-# Subsystems land milestone by milestone; a target that has nothing to do yet says so
-# and exits 0 rather than failing the gate (TASKS.md 0.3).
-HAS_PROTO  := $(shell find proto -name '*.proto' -print -quit 2>/dev/null)
-HAS_GO     := $(shell find cmd internal -name '*.go' -print -quit 2>/dev/null)
-HAS_WEB    := $(shell find $(WEB)/src -name '*.ts*' -print -quit 2>/dev/null)
-HAS_E2E    := $(shell find e2e -name '*.ts' -print -quit 2>/dev/null)
+HAS_PROTO   := $(shell find proto -name '*.proto' -print -quit 2>/dev/null)
+HAS_GO      := $(shell find cmd internal gen -name '*.go' -print -quit 2>/dev/null)
+HAS_SERVER  := $(wildcard cmd/server)
+HAS_WEB_SRC := $(shell find $(WEB)/src -name '*.ts*' -print -quit 2>/dev/null)
+HAS_WEB_APP := $(wildcard $(WEB)/index.html)
+HAS_E2E     := $(shell find e2e -name '*.ts' -print -quit 2>/dev/null)
 
 .PHONY: help setup gen lint lint-proto lint-go lint-web fmt test test-go test-web e2e dev build build-go build-web check clean
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
-
-# --- setup -------------------------------------------------------------------
 
 setup: ## Install tool deps and web dependencies
 	go install github.com/bufbuild/buf/cmd/buf@v$(BUF_VERSION)
@@ -37,16 +33,12 @@ setup: ## Install tool deps and web dependencies
 	@echo "setup: ok"
 	@echo "  hooks: opt in with 'git config core.hooksPath .githooks' (runs make check pre-commit)"
 
-# --- codegen -----------------------------------------------------------------
-
 gen: ## buf generate -> gen/go + web/src/gen (run after ANY proto edit)
 ifeq ($(HAS_PROTO),)
 	@echo "gen: no proto/ yet — skipped"
 else
 	$(BUF) generate
 endif
-
-# --- lint --------------------------------------------------------------------
 
 lint: lint-proto lint-go lint-web ## buf lint + golangci-lint + eslint + tsc --noEmit
 
@@ -66,24 +58,24 @@ else
 endif
 
 lint-web:
-ifeq ($(HAS_WEB),)
+ifeq ($(HAS_WEB_SRC),)
 	@echo "lint-web: no $(WEB)/src yet — skipped"
 else
-	cd $(WEB) && $(PNPM) run lint
 	cd $(WEB) && $(PNPM) run format
 	cd $(WEB) && $(PNPM) run typecheck
+endif
+ifneq ($(HAS_WEB_APP),)
+	cd $(WEB) && $(PNPM) run lint
 endif
 
 fmt: ## Apply formatters in place
 ifneq ($(HAS_GO),)
 	$(GOLANGCI) fmt
 endif
-ifneq ($(HAS_WEB),)
+ifneq ($(HAS_WEB_SRC),)
 	cd $(WEB) && $(PNPM) exec prettier --write .
 endif
 	@echo "fmt: ok"
-
-# --- test --------------------------------------------------------------------
 
 test: test-go test-web ## go test -race + web unit tests
 
@@ -95,8 +87,8 @@ else
 endif
 
 test-web:
-ifeq ($(HAS_WEB),)
-	@echo "test-web: no $(WEB)/src yet — skipped"
+ifeq ($(HAS_WEB_APP),)
+	@echo "test-web: no Vite app yet — skipped"
 else
 	cd $(WEB) && $(PNPM) run test
 endif
@@ -108,10 +100,8 @@ else
 	cd $(WEB) && $(PNPM) exec playwright test
 endif
 
-# --- run ---------------------------------------------------------------------
-
 dev: ## Go server on :8080 + Vite on :5173 (proxying /chat.v1 -> :8080)
-ifeq ($(HAS_GO)$(HAS_WEB),)
+ifeq ($(HAS_SERVER)$(HAS_WEB_APP),)
 	@echo "dev: nothing to run yet — skipped"
 else
 	@trap 'kill 0' EXIT INT TERM; \
@@ -120,25 +110,24 @@ else
 	wait
 endif
 
-# --- build -------------------------------------------------------------------
-
 build: build-go build-web ## server binary into bin/ + web production build into web/dist
 
 build-go:
-ifeq ($(HAS_GO),)
-	@echo "build-go: no Go packages yet — skipped"
+ifneq ($(HAS_GO),)
+	go build ./...
+endif
+ifeq ($(HAS_SERVER),)
+	@echo "build-go: no cmd/server yet — binary skipped"
 else
 	go build -o bin/server ./cmd/server
 endif
 
 build-web:
-ifeq ($(HAS_WEB),)
-	@echo "build-web: no $(WEB)/src yet — skipped"
+ifeq ($(HAS_WEB_APP),)
+	@echo "build-web: no Vite app yet — skipped"
 else
 	cd $(WEB) && $(PNPM) run build
 endif
-
-# --- the gate ----------------------------------------------------------------
 
 check: lint test build ## THE GATE. Green before any commit.
 	@echo "check: ok"

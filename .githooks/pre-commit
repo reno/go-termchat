@@ -1,5 +1,3 @@
 #!/bin/sh
-# termchat pre-commit hook — the gate from AGENTS.md §4.
-# Opt in with:  git config core.hooksPath .githooks
 set -e
 exec make check
