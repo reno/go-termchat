@@ -14,6 +14,7 @@ import { newClientId } from "@/lib/id";
 import { flush, isOnline, onOnline, queue } from "@/lib/outbox";
 import { UPDATE_AVAILABLE, watchForUpdates } from "@/lib/updates";
 
+import { channelFromSearch, searchWithChannel } from "./channelUrl";
 import { applyTheme, helpText, mentionDraft, parseCommand } from "./commands";
 import type { MessageView } from "./model";
 import { useChatStore } from "./store";
@@ -108,6 +109,8 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
     if (me === null) {
       return;
     }
+    const wanted = channelFromSearch(globalThis.location.search) ?? DEFAULT_CHANNEL;
+
     void (async () => {
       try {
         const cached = await loadChannels();
@@ -116,18 +119,66 @@ export function useChat(clients: SessionClients, me: string | null, onLeave: () 
           for (const channel of cached) {
             useChatStore.getState().prependMessages(channel.id, await loadMessages(channel.id));
           }
-          const first = cached[0];
-          if (first !== undefined && useChatStore.getState().activeId === null) {
-            setActive(first.id);
+          const preferred = cached.find((channel) => channel.name === wanted) ?? cached[0];
+          if (preferred !== undefined && useChatStore.getState().activeId === null) {
+            setActive(preferred.id);
           }
         }
         await saveSession(me);
       } catch {
         // A cache that will not open costs a slower first paint, nothing else.
       }
-      await openChannel(DEFAULT_CHANNEL);
+
+      try {
+        await openChannel(wanted);
+      } catch {
+        if (wanted !== DEFAULT_CHANNEL) {
+          await openChannel(DEFAULT_CHANNEL).catch(() => undefined);
+        }
+      }
     })();
   }, [me, openChannel, setActive]);
+
+  useEffect(() => {
+    const active = store.channels.find((channel) => channel.id === activeId);
+    if (active === undefined) {
+      return;
+    }
+    const current = channelFromSearch(globalThis.location.search);
+    if (current === active.name) {
+      return;
+    }
+    const url =
+      searchWithChannel(globalThis.location.search, active.name) + globalThis.location.hash;
+    if (current === null) {
+      globalThis.history.replaceState(globalThis.history.state, "", url);
+    } else {
+      globalThis.history.pushState(globalThis.history.state, "", url);
+    }
+  }, [activeId, store.channels]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const wanted = channelFromSearch(globalThis.location.search);
+      if (wanted === null) {
+        return;
+      }
+      const state = useChatStore.getState();
+      const known = state.channels.find((channel) => channel.name === wanted);
+      if (known !== undefined) {
+        if (known.id !== state.activeId) {
+          setActive(known.id);
+        }
+        return;
+      }
+      void openChannel(wanted).catch(() => undefined);
+    };
+
+    globalThis.addEventListener("popstate", onPopState);
+    return () => {
+      globalThis.removeEventListener("popstate", onPopState);
+    };
+  }, [openChannel, setActive]);
 
   useEffect(() => {
     if (me === null) {
