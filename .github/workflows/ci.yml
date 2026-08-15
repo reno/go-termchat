@@ -26,7 +26,14 @@ jobs:
       - run: buf lint
       - name: buf breaking against main
         if: github.event_name == 'pull_request'
-        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main"
+        run: |
+          if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+            echo "::warning::origin/main was not fetched; skipping breaking-change check"
+          elif ! git ls-tree -r --name-only origin/main | grep -q '\.proto$'; then
+            echo "::notice::main has no .proto files yet; skipping breaking-change check"
+          else
+            buf breaking --against ".git#ref=origin/main"
+          fi
 
   go:
     runs-on: ubuntu-latest

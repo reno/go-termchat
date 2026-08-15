@@ -27,6 +27,7 @@ go.work.sum
 
 # env file
 .env
+.env.local
 
 cmd/server/dist/*
 !cmd/server/dist/placeholder.txt
