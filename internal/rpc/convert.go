@@ -68,6 +68,56 @@ func MessageProto(m chat.Message) *chatv1.Message {
 	}
 }
 
+func EventProto(e chat.Event) *chatv1.Event {
+	event := &chatv1.Event{
+		EventId:   e.ID,
+		EmittedAt: timestamppb.New(e.EmittedAt),
+	}
+
+	switch e.Kind {
+	case chat.EventMessageCreated:
+		event.Payload = &chatv1.Event_MessageCreated{
+			MessageCreated: &chatv1.MessageCreated{Message: MessageProto(e.Message)},
+		}
+	case chat.EventDirectMessage:
+		event.Payload = &chatv1.Event_DirectMessage{
+			DirectMessage: &chatv1.DirectMessage{
+				Message:       MessageProto(e.Message),
+				RecipientNick: e.Recipient,
+			},
+		}
+	case chat.EventMemberJoined:
+		event.Payload = &chatv1.Event_MemberJoined{
+			MemberJoined: &chatv1.MemberJoined{
+				ChannelId: e.ChannelID,
+				Member:    MemberProto(e.Member, e.EmittedAt),
+			},
+		}
+	case chat.EventMemberLeft:
+		event.Payload = &chatv1.Event_MemberLeft{
+			MemberLeft: &chatv1.MemberLeft{ChannelId: e.ChannelID, Nick: e.Nick},
+		}
+	case chat.EventTypingChanged:
+		event.Payload = &chatv1.Event_TypingChanged{
+			TypingChanged: &chatv1.TypingChanged{
+				ChannelId: e.ChannelID,
+				Nick:      e.Nick,
+				Typing:    e.Typing,
+			},
+		}
+	case chat.EventPresenceChanged:
+		event.Payload = &chatv1.Event_PresenceChanged{
+			PresenceChanged: &chatv1.PresenceChanged{
+				Nick:     e.Nick,
+				Presence: presenceToProto[e.Presence],
+			},
+		}
+	case chat.EventUnspecified:
+	}
+
+	return event
+}
+
 func ChannelProto(c chat.Channel, members int) *chatv1.Channel {
 	return &chatv1.Channel{
 		Id:          c.ID,

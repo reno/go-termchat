@@ -358,9 +358,14 @@ func (m *Memory) Sweep(_ context.Context, now time.Time) (SweepStats, error) {
 	var stats SweepStats
 
 	for id, s := range m.sessions {
-		if s.Expired(now) {
-			m.dropSession(id)
-			stats.SessionsExpired++
+		if !s.Expired(now) {
+			continue
+		}
+		departure := Departure{Nick: s.Nick, Channels: m.channelsOf(id)}
+		m.dropSession(id)
+		stats.SessionsExpired++
+		if len(departure.Channels) > 0 {
+			stats.Departed = append(stats.Departed, departure)
 		}
 	}
 
@@ -374,6 +379,33 @@ func (m *Memory) Sweep(_ context.Context, now time.Time) (SweepStats, error) {
 		}
 	}
 	return stats, nil
+}
+
+func (m *Memory) ExpireTyping(_ context.Context, now time.Time) ([]TypingExpiry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var expired []TypingExpiry
+	for channelID, state := range m.channels {
+		for sessionID, member := range state.members {
+			if member.TypingUntil.IsZero() || member.Typing(now) {
+				continue
+			}
+			member.TypingUntil = time.Time{}
+			state.members[sessionID] = member
+			expired = append(expired, TypingExpiry{ChannelID: channelID, Nick: member.Nick})
+		}
+	}
+	return expired, nil
+}
+
+func (m *Memory) channelsOf(sessionID string) []string {
+	out := make([]string, 0, len(m.memberOf[sessionID]))
+	for channelID := range m.memberOf[sessionID] {
+		out = append(out, channelID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (m *Memory) dropSession(id string) {

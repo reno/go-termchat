@@ -13,7 +13,7 @@ import (
 var at = time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
 
 func event(id string) chat.Event {
-	return chat.MessageCreated(id, at, chat.Message{
+	return chat.MessageCreated(at, chat.Message{
 		ID:        id,
 		ChannelID: "c1",
 		Author:    "rill",

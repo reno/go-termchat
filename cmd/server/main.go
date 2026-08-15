@@ -48,7 +48,6 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 	memory := store.NewMemory(cfg.Retention)
 	events := hub.New(cfg.EventBuffer)
 	limiter := chat.NewRateLimiter(cfg.Rate)
-	ids := chat.NewIDGen()
 
 	manager := session.NewManager(
 		memory, signer, rules,
@@ -56,9 +55,12 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 		cfg.Session.TTL,
 	)
 
+	ids := chat.NewIDGen()
+
 	sweeper := store.NewSweeper(memory, cfg.Retention.SweepInterval,
 		store.WithSweepHook(func(stats store.SweepStats) {
 			limiter.Sweep(time.Now())
+			announceDepartures(events, ids, stats.Departed)
 			log.InfoContext(ctx, "retention swept",
 				slog.Int("messages_dropped", stats.MessagesDropped),
 				slog.Int("channels_reaped", stats.ChannelsReaped),
@@ -69,11 +71,13 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 
 	swept := make(chan error, 1)
 	go func() { swept <- sweeper.Run(ctx) }()
+	go expireTyping(ctx, memory, events, ids, cfg.TypingTTL)
 
 	handler := rpc.CORS(cfg.CORSOrigins, rpc.NewMux(rpc.Services{
 		Sessions: rpc.NewSessionHandler(manager),
-		Chat:     rpc.NewChatHandler(memory, events, rules, limiter, ids, cfg.TypingTTL),
-		Manager:  manager,
+		Chat: rpc.NewChatHandler(memory, events, rules, limiter, ids, cfg.TypingTTL,
+			rpc.WithKeepalive(cfg.Keepalive)),
+		Manager: manager,
 	}))
 
 	protocols := new(http.Protocols)
@@ -116,4 +120,48 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 		return err
 	}
 	return nil
+}
+
+func announceDepartures(events *hub.Hub, ids *chat.IDGen, departed []store.Departure) {
+	now := time.Now()
+	for _, departure := range departed {
+		for _, channelID := range departure.Channels {
+			id, err := ids.New(now)
+			if err != nil {
+				return
+			}
+			events.PublishChannel(channelID, chat.MemberLeft(id, now, channelID, departure.Nick))
+		}
+	}
+}
+
+func expireTyping(
+	ctx context.Context,
+	st store.Store,
+	events *hub.Hub,
+	ids *chat.IDGen,
+	every time.Duration,
+) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			expired, err := st.ExpireTyping(ctx, now)
+			if err != nil {
+				return
+			}
+			for _, entry := range expired {
+				id, idErr := ids.New(now)
+				if idErr != nil {
+					return
+				}
+				events.PublishChannel(entry.ChannelID,
+					chat.TypingChanged(id, now, entry.ChannelID, entry.Nick, false))
+			}
+		}
+	}
 }

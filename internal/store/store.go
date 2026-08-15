@@ -17,6 +17,17 @@ type SweepStats struct {
 	MessagesDropped int
 	ChannelsReaped  int
 	SessionsExpired int
+	Departed        []Departure
+}
+
+type Departure struct {
+	Nick     string
+	Channels []string
+}
+
+type TypingExpiry struct {
+	ChannelID string
+	Nick      string
 }
 
 type Clock interface {
@@ -51,6 +62,8 @@ type Store interface {
 
 	Append(ctx context.Context, m chat.Message) (chat.Message, bool, error)
 	Messages(ctx context.Context, channelID, cursor string, limit int) (Page, error)
+
+	ExpireTyping(ctx context.Context, now time.Time) ([]TypingExpiry, error)
 
 	Sweep(ctx context.Context, now time.Time) (SweepStats, error)
 }

@@ -30,6 +30,7 @@ type Config struct {
 	Limits        chat.Limits
 	Rate          chat.Rate
 	TypingTTL     time.Duration
+	Keepalive     time.Duration
 	EventBuffer   int
 	CORSOrigins   []string
 	ShutdownGrace time.Duration
@@ -68,6 +69,7 @@ func Default() Config {
 		Limits:        chat.DefaultLimits(),
 		Rate:          chat.DefaultRate(),
 		TypingTTL:     5 * time.Second,
+		Keepalive:     20 * time.Second,
 		EventBuffer:   64,
 		ShutdownGrace: 10 * time.Second,
 	}
@@ -139,6 +141,11 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.TypingTTL, err = span(
 		getenv, "TERMCHAT_TYPING_TTL", cfg.TypingTTL,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.Keepalive, err = span(
+		getenv, "TERMCHAT_KEEPALIVE", cfg.Keepalive,
 	); err != nil {
 		return Config{}, err
 	}

@@ -16,13 +16,14 @@ import (
 const CreatedChannelSuffix = " — you created this channel."
 
 type ChatHandler struct {
-	store   store.Store
-	hub     *hub.Hub
-	rules   chat.Rules
-	limiter *chat.RateLimiter
-	ids     *chat.IDGen
-	clock   store.Clock
-	typing  time.Duration
+	store     store.Store
+	hub       *hub.Hub
+	rules     chat.Rules
+	limiter   *chat.RateLimiter
+	ids       *chat.IDGen
+	clock     store.Clock
+	typing    time.Duration
+	keepalive time.Duration
 }
 
 var _ chatv1connect.ChatServiceHandler = (*ChatHandler)(nil)
@@ -31,6 +32,10 @@ type ChatOption func(*ChatHandler)
 
 func WithChatClock(c store.Clock) ChatOption {
 	return func(h *ChatHandler) { h.clock = c }
+}
+
+func WithKeepalive(d time.Duration) ChatOption {
+	return func(h *ChatHandler) { h.keepalive = d }
 }
 
 func NewChatHandler(
@@ -43,13 +48,14 @@ func NewChatHandler(
 	opts ...ChatOption,
 ) *ChatHandler {
 	h := &ChatHandler{
-		store:   st,
-		hub:     events,
-		rules:   rules,
-		limiter: limiter,
-		ids:     ids,
-		clock:   store.SystemClock{},
-		typing:  typingTTL,
+		store:     st,
+		hub:       events,
+		rules:     rules,
+		limiter:   limiter,
+		ids:       ids,
+		clock:     store.SystemClock{},
+		typing:    typingTTL,
+		keepalive: 20 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -280,11 +286,7 @@ func (h *ChatHandler) SendMessage(
 	}
 
 	if !deduplicated {
-		if err := h.publishChannel(channelID, now, func(eventID string, at time.Time) chat.Event {
-			return chat.MessageCreated(eventID, at, stored)
-		}); err != nil {
-			return nil, Error(err)
-		}
+		h.hub.PublishChannel(channelID, chat.MessageCreated(now, stored))
 	}
 
 	return connect.NewResponse(&chatv1.SendMessageResponse{
@@ -340,11 +342,7 @@ func (h *ChatHandler) SendDirectMessage(
 	delivered := lookupErr == nil && h.hub.SessionOnline(target.ID)
 
 	if delivered {
-		eventID, eventErr := h.ids.New(now)
-		if eventErr != nil {
-			return nil, Error(eventErr)
-		}
-		event := chat.DirectMessageSent(eventID, now, message, recipient)
+		event := chat.DirectMessageSent(now, message, recipient)
 		h.hub.PublishSession(target.ID, event)
 		if target.ID != current.ID {
 			h.hub.PublishSession(current.ID, event)
@@ -388,17 +386,6 @@ func (h *ChatHandler) SetTyping(
 	return connect.NewResponse(&chatv1.SetTypingResponse{}), nil
 }
 
-func (h *ChatHandler) StreamEvents(
-	ctx context.Context,
-	_ *connect.Request[chatv1.StreamEventsRequest],
-	_ *connect.ServerStream[chatv1.StreamEventsResponse],
-) error {
-	if _, err := caller(ctx); err != nil {
-		return err
-	}
-	return connect.NewError(connect.CodeUnimplemented, errStreamNotWired)
-}
-
 func (h *ChatHandler) seedCreationNotice(ctx context.Context, channel chat.Channel, now time.Time) error {
 	id, err := h.ids.New(now)
 	if err != nil {
@@ -418,9 +405,8 @@ func (h *ChatHandler) seedCreationNotice(ctx context.Context, channel chat.Chann
 		return err
 	}
 
-	return h.publishChannel(channel.ID, now, func(eventID string, at time.Time) chat.Event {
-		return chat.MessageCreated(eventID, at, stored)
-	})
+	h.hub.PublishChannel(channel.ID, chat.MessageCreated(now, stored))
+	return nil
 }
 
 func (h *ChatHandler) publishChannel(channelID string, now time.Time, build func(string, time.Time) chat.Event) error {

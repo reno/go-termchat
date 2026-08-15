@@ -94,7 +94,8 @@ func newHarness(t *testing.T) *harness {
 		Sessions: rpc.NewSessionHandler(manager),
 		Chat: rpc.NewChatHandler(
 			memory, events, chat.NewRules(chat.DefaultLimits()),
-			limiter, ids, typingTTL, rpc.WithChatClock(clock),
+			limiter, ids, typingTTL,
+			rpc.WithChatClock(clock), rpc.WithKeepalive(200*time.Millisecond),
 		),
 		Manager: manager,
 	}))

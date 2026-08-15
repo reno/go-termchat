@@ -45,9 +45,9 @@ type Event struct {
 	Presence  Presence
 }
 
-func MessageCreated(id string, at time.Time, m Message) Event {
+func MessageCreated(at time.Time, m Message) Event {
 	return Event{
-		ID:        id,
+		ID:        m.ID,
 		EmittedAt: at,
 		Kind:      EventMessageCreated,
 		ChannelID: m.ChannelID,
@@ -55,9 +55,9 @@ func MessageCreated(id string, at time.Time, m Message) Event {
 	}
 }
 
-func DirectMessageSent(id string, at time.Time, m Message, recipient string) Event {
+func DirectMessageSent(at time.Time, m Message, recipient string) Event {
 	return Event{
-		ID:        id,
+		ID:        m.ID,
 		EmittedAt: at,
 		Kind:      EventDirectMessage,
 		Message:   m,
