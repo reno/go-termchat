@@ -97,6 +97,9 @@ enum ErrorReason {
   ERROR_REASON_CURSOR_INVALID = 11;
   // Resume asked for events that retention has already dropped.
   ERROR_REASON_EVENTS_EVICTED = 12;
+  // Caller sent a MessageKind it is not allowed to author. SYSTEM is server-authored and
+  // DIRECT belongs to SendDirectMessage.
+  ERROR_REASON_MESSAGE_KIND_INVALID = 13;
 }
 
 // ErrorDetail is attached to a connect.Error as an error detail. Failures are never encoded

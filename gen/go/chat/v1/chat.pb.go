@@ -121,6 +121,9 @@ const (
 	ErrorReason_ERROR_REASON_CURSOR_INVALID ErrorReason = 11
 	// Resume asked for events that retention has already dropped.
 	ErrorReason_ERROR_REASON_EVENTS_EVICTED ErrorReason = 12
+	// Caller sent a MessageKind it is not allowed to author. SYSTEM is server-authored and
+	// DIRECT belongs to SendDirectMessage.
+	ErrorReason_ERROR_REASON_MESSAGE_KIND_INVALID ErrorReason = 13
 )
 
 // Enum value maps for ErrorReason.
@@ -139,6 +142,7 @@ var (
 		10: "ERROR_REASON_RECIPIENT_OFFLINE",
 		11: "ERROR_REASON_CURSOR_INVALID",
 		12: "ERROR_REASON_EVENTS_EVICTED",
+		13: "ERROR_REASON_MESSAGE_KIND_INVALID",
 	}
 	ErrorReason_value = map[string]int32{
 		"ERROR_REASON_UNSPECIFIED":          0,
@@ -154,6 +158,7 @@ var (
 		"ERROR_REASON_RECIPIENT_OFFLINE":    10,
 		"ERROR_REASON_CURSOR_INVALID":       11,
 		"ERROR_REASON_EVENTS_EVICTED":       12,
+		"ERROR_REASON_MESSAGE_KIND_INVALID": 13,
 	}
 )
 
@@ -1977,7 +1982,7 @@ const file_chat_v1_chat_proto_rawDesc = "" +
 	"\x13MESSAGE_KIND_NORMAL\x10\x01\x12\x17\n" +
 	"\x13MESSAGE_KIND_SYSTEM\x10\x02\x12\x17\n" +
 	"\x13MESSAGE_KIND_ACTION\x10\x03\x12\x17\n" +
-	"\x13MESSAGE_KIND_DIRECT\x10\x04*\xb5\x03\n" +
+	"\x13MESSAGE_KIND_DIRECT\x10\x04*\xdc\x03\n" +
 	"\vErrorReason\x12\x1c\n" +
 	"\x18ERROR_REASON_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ERROR_REASON_NICK_TAKEN\x10\x01\x12\x1d\n" +
@@ -1992,7 +1997,8 @@ const file_chat_v1_chat_proto_rawDesc = "" +
 	"\x1eERROR_REASON_RECIPIENT_OFFLINE\x10\n" +
 	"\x12\x1f\n" +
 	"\x1bERROR_REASON_CURSOR_INVALID\x10\v\x12\x1f\n" +
-	"\x1bERROR_REASON_EVENTS_EVICTED\x10\f2\xd3\x05\n" +
+	"\x1bERROR_REASON_EVENTS_EVICTED\x10\f\x12%\n" +
+	"!ERROR_REASON_MESSAGE_KIND_INVALID\x10\r2\xd3\x05\n" +
 	"\vChatService\x12M\n" +
 	"\fListChannels\x12\x1c.chat.v1.ListChannelsRequest\x1a\x1d.chat.v1.ListChannelsResponse\"\x00\x12J\n" +
 	"\vJoinChannel\x12\x1b.chat.v1.JoinChannelRequest\x1a\x1c.chat.v1.JoinChannelResponse\"\x00\x12M\n" +
