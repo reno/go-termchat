@@ -23,11 +23,16 @@ const (
 const MinSessionKeyLen = 32
 
 type Config struct {
-	Env       Env
-	Addr      string
-	Session   Session
-	Retention Retention
-	Limits    chat.Limits
+	Env           Env
+	Addr          string
+	Session       Session
+	Retention     Retention
+	Limits        chat.Limits
+	Rate          chat.Rate
+	TypingTTL     time.Duration
+	EventBuffer   int
+	CORSOrigins   []string
+	ShutdownGrace time.Duration
 }
 
 type Session struct {
@@ -60,7 +65,11 @@ func Default() Config {
 			MessageTTL:         time.Hour,
 			SweepInterval:      time.Minute,
 		},
-		Limits: chat.DefaultLimits(),
+		Limits:        chat.DefaultLimits(),
+		Rate:          chat.DefaultRate(),
+		TypingTTL:     5 * time.Second,
+		EventBuffer:   64,
+		ShutdownGrace: 10 * time.Second,
 	}
 }
 
@@ -113,8 +122,68 @@ func Load(getenv func(string) string) (Config, error) {
 	); err != nil {
 		return Config{}, err
 	}
+	if cfg.Rate.Burst, err = count(
+		getenv, "TERMCHAT_SEND_BURST", cfg.Rate.Burst,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.Rate.Refill, err = span(
+		getenv, "TERMCHAT_SEND_REFILL", cfg.Rate.Refill,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.Rate.Idle, err = span(
+		getenv, "TERMCHAT_SEND_IDLE", cfg.Rate.Idle,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.TypingTTL, err = span(
+		getenv, "TERMCHAT_TYPING_TTL", cfg.TypingTTL,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.EventBuffer, err = count(
+		getenv, "TERMCHAT_EVENT_BUFFER", cfg.EventBuffer,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.ShutdownGrace, err = span(
+		getenv, "TERMCHAT_SHUTDOWN_GRACE", cfg.ShutdownGrace,
+	); err != nil {
+		return Config{}, err
+	}
+	if cfg.CORSOrigins, err = list(getenv, "TERMCHAT_CORS_ORIGINS"); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
+}
+
+func list(getenv func(string) string, key string) ([]string, error) {
+	raw, set, err := lookup(getenv, key)
+	if err != nil {
+		return nil, err
+	}
+	if !set {
+		return nil, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "*" {
+			return nil, fmt.Errorf("config: %s: %q is not allowed, list origins explicitly", key, "*")
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("config: %s: no usable origins", key)
+	}
+	return out, nil
 }
 
 func environment(getenv func(string) string) (Env, error) {

@@ -23,23 +23,25 @@ const (
 	ReasonCursorInvalid
 	ReasonEventsEvicted
 	ReasonMessageKindInvalid
+	ReasonClientMessageIDInvalid
 )
 
 var reasonMessages = map[Reason]string{
-	ReasonUnspecified:        "unspecified failure",
-	ReasonNickTaken:          "nick already taken",
-	ReasonNickInvalid:        "nick is not valid",
-	ReasonChannelNameInvalid: "channel name is not valid",
-	ReasonBodyTooLong:        "message body is too long",
-	ReasonBodyEmpty:          "message body is empty",
-	ReasonNotAMember:         "not a member of that channel",
-	ReasonChannelNotFound:    "no such channel",
-	ReasonRateLimited:        "sending too fast",
-	ReasonSessionExpired:     "session has expired",
-	ReasonRecipientOffline:   "recipient is not connected",
-	ReasonCursorInvalid:      "cursor is not valid",
-	ReasonEventsEvicted:      "events have been forgotten",
-	ReasonMessageKindInvalid: "message kind is not one a client may author",
+	ReasonUnspecified:            "unspecified failure",
+	ReasonNickTaken:              "nick already taken",
+	ReasonNickInvalid:            "nick is not valid",
+	ReasonChannelNameInvalid:     "channel name is not valid",
+	ReasonBodyTooLong:            "message body is too long",
+	ReasonBodyEmpty:              "message body is empty",
+	ReasonNotAMember:             "not a member of that channel",
+	ReasonChannelNotFound:        "no such channel",
+	ReasonRateLimited:            "sending too fast",
+	ReasonSessionExpired:         "session has expired",
+	ReasonRecipientOffline:       "recipient is not connected",
+	ReasonCursorInvalid:          "cursor is not valid",
+	ReasonEventsEvicted:          "events have been forgotten",
+	ReasonMessageKindInvalid:     "message kind is not one a client may author",
+	ReasonClientMessageIDInvalid: "client message id is missing or not a ulid",
 }
 
 func (r Reason) String() string {

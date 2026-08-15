@@ -16,6 +16,7 @@ import (
 	"github.com/reno/go-termchat/gen/go/chat/v1/chatv1connect"
 	"github.com/reno/go-termchat/internal/chat"
 	"github.com/reno/go-termchat/internal/config"
+	"github.com/reno/go-termchat/internal/hub"
 	"github.com/reno/go-termchat/internal/rpc"
 	"github.com/reno/go-termchat/internal/session"
 	"github.com/reno/go-termchat/internal/store"
@@ -39,18 +40,32 @@ func (c *testClock) Advance(d time.Duration) {
 }
 
 type harness struct {
-	server *httptest.Server
-	clock  *testClock
-	ttl    time.Duration
+	server    *httptest.Server
+	store     *store.Memory
+	hub       *hub.Hub
+	manager   *session.Manager
+	clock     *testClock
+	ttl       time.Duration
+	ids       *chat.IDGen
+	capacity  int
+	burst     int
+	refill    time.Duration
+	typingTTL time.Duration
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 
-	const ttl = 30 * time.Minute
+	const (
+		ttl       = 30 * time.Minute
+		capacity  = 8
+		burst     = 5
+		refill    = 2 * time.Second
+		typingTTL = 5 * time.Second
+	)
 
 	memory := store.NewMemory(config.Retention{
-		MessagesPerChannel: 32,
+		MessagesPerChannel: capacity,
 		MessageTTL:         time.Hour,
 		SweepInterval:      time.Minute,
 	})
@@ -67,18 +82,115 @@ func newHarness(t *testing.T) *harness {
 		session.WithClock(clock),
 	)
 
-	mux := http.NewServeMux()
-	mux.Handle(chatv1connect.NewSessionServiceHandler(
-		rpc.NewSessionHandler(manager),
-		connect.WithInterceptors(session.NewInterceptor(
-			manager, rpc.Error, chatv1connect.SessionServiceJoinProcedure,
-		)),
-	))
+	ids := chat.NewIDGen()
+	events := hub.New(16)
+	limiter := chat.NewRateLimiter(chat.Rate{
+		Burst:  burst,
+		Refill: refill,
+		Idle:   5 * time.Minute,
+	})
 
-	server := httptest.NewTLSServer(mux)
+	server := httptest.NewTLSServer(rpc.NewMux(rpc.Services{
+		Sessions: rpc.NewSessionHandler(manager),
+		Chat: rpc.NewChatHandler(
+			memory, events, chat.NewRules(chat.DefaultLimits()),
+			limiter, ids, typingTTL, rpc.WithChatClock(clock),
+		),
+		Manager: manager,
+	}))
 	t.Cleanup(server.Close)
 
-	return &harness{server: server, clock: clock, ttl: ttl}
+	return &harness{
+		server:    server,
+		store:     memory,
+		hub:       events,
+		manager:   manager,
+		clock:     clock,
+		ttl:       ttl,
+		ids:       ids,
+		capacity:  capacity,
+		burst:     burst,
+		refill:    refill,
+		typingTTL: typingTTL,
+	}
+}
+
+func (h *harness) chatClient(t *testing.T, nick string) chatv1connect.ChatServiceClient {
+	t.Helper()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar: %v", err)
+	}
+	httpClient := h.httpClient(t, jar)
+
+	sessions := chatv1connect.NewSessionServiceClient(httpClient, h.server.URL)
+	if _, err := sessions.Join(t.Context(), connect.NewRequest(&chatv1.JoinRequest{Nick: nick})); err != nil {
+		t.Fatalf("Join(%q): %v", nick, err)
+	}
+	return chatv1connect.NewChatServiceClient(httpClient, h.server.URL)
+}
+
+func (h *harness) subscribe(t *testing.T, nick string) *hub.Subscription {
+	t.Helper()
+
+	current, err := h.store.SessionByNick(t.Context(), nick)
+	if err != nil {
+		joined, _, joinErr := h.manager.Join(t.Context(), nick)
+		if joinErr != nil {
+			t.Fatalf("Join(%q): %v", nick, joinErr)
+		}
+		current = joined
+	}
+
+	sub := h.hub.Subscribe(current.ID)
+	t.Cleanup(func() { h.hub.Unsubscribe(sub) })
+	return sub
+}
+
+func (h *harness) subscribeToChannel(t *testing.T, nick, channelID string) *hub.Subscription {
+	t.Helper()
+
+	sub := h.subscribe(t, nick)
+	h.hub.JoinChannel(sub.SessionID(), channelID)
+	return sub
+}
+
+func (h *harness) newID(t *testing.T) string {
+	t.Helper()
+
+	id, err := h.ids.New(h.clock.Now())
+	if err != nil {
+		t.Fatalf("new id: %v", err)
+	}
+	return id
+}
+
+func (h *harness) joinChannel(t *testing.T, client chatv1connect.ChatServiceClient, name string) string {
+	t.Helper()
+
+	res, err := client.JoinChannel(t.Context(), connect.NewRequest(&chatv1.JoinChannelRequest{Name: name}))
+	if err != nil {
+		t.Fatalf("JoinChannel(%q): %v", name, err)
+	}
+	return res.Msg.GetChannel().GetId()
+}
+
+func (h *harness) send(t *testing.T, client chatv1connect.ChatServiceClient, channelID, body string) *chatv1.Message {
+	t.Helper()
+
+	h.clock.Advance(h.refill)
+
+	res, err := client.SendMessage(t.Context(), connect.NewRequest(&chatv1.SendMessageRequest{
+		ChannelId:       channelID,
+		ClientMessageId: h.newID(t),
+		Body:            body,
+		Kind:            chatv1.MessageKind_MESSAGE_KIND_NORMAL,
+	}))
+	if err != nil {
+		t.Fatalf("SendMessage(%q): %v", body, err)
+	}
+	return res.Msg.GetMessage()
 }
 
 func (h *harness) client(t *testing.T) chatv1connect.SessionServiceClient {
@@ -142,6 +254,38 @@ func codeOf(t *testing.T, err error) connect.Code {
 		t.Fatal("expected an error, got nil")
 	}
 	return connect.CodeOf(err)
+}
+
+func errorDetailOf(t *testing.T, err error) *chatv1.ErrorDetail {
+	t.Helper()
+
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		t.Fatalf("not a connect error: %v", err)
+	}
+	for _, detail := range connectErr.Details() {
+		value, valueErr := detail.Value()
+		if valueErr != nil {
+			continue
+		}
+		if errorDetail, ok := value.(*chatv1.ErrorDetail); ok {
+			return errorDetail
+		}
+	}
+	t.Fatalf("no chat.v1.ErrorDetail attached to %v", err)
+	return nil
+}
+
+func detailLimit(t *testing.T, err error) uint32 {
+	t.Helper()
+
+	return errorDetailOf(t, err).GetLimit()
+}
+
+func detailRetryAfter(t *testing.T, err error) time.Duration {
+	t.Helper()
+
+	return errorDetailOf(t, err).GetRetryAfter().AsDuration()
 }
 
 func detailReason(t *testing.T, err error) chatv1.ErrorReason {

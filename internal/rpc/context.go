@@ -19,3 +19,5 @@ func caller(ctx context.Context) (chat.Session, error) {
 	}
 	return s, nil
 }
+
+var errStreamNotWired = errors.New("StreamEvents is wired in TASKS 5.2")

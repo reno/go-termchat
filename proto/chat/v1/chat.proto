@@ -100,6 +100,9 @@ enum ErrorReason {
   // Caller sent a MessageKind it is not allowed to author. SYSTEM is server-authored and
   // DIRECT belongs to SendDirectMessage.
   ERROR_REASON_MESSAGE_KIND_INVALID = 13;
+  // client_message_id is missing or is not a ULID. This one is aimed at the client's own
+  // outbox rather than at anything the user typed.
+  ERROR_REASON_CLIENT_MESSAGE_ID_INVALID = 14;
 }
 
 // ErrorDetail is attached to a connect.Error as an error detail. Failures are never encoded
