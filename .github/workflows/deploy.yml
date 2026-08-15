@@ -38,6 +38,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Check required secrets
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          missing=()
+          [ -n "$ORACLE_HOST" ] || missing+=(ORACLE_HOST)
+          [ -n "$ORACLE_SSH_KEY" ] || missing+=(ORACLE_SSH_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
+          case "$ORACLE_SSH_KEY" in
+            *"PRIVATE KEY"*) ;;
+            *)
+              echo "::error::ORACLE_SSH_KEY is not an OpenSSH private key (a public .pub key or PuTTY .ppk will not work)"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure SSH
+        env:
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          ORACLE_SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/oracle
+          chmod 600 ~/.ssh/oracle
+          if [ -n "$ORACLE_SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$ORACLE_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::ORACLE_SSH_KNOWN_HOSTS is not set; trusting the host key on first use"
+            ssh-keyscan -T 15 "$ORACLE_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/oracle || echo "::warning::could not read a fingerprint from ORACLE_SSH_KEY"
+
+      - name: Verify SSH access
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_SSH_USER: ${{ secrets.ORACLE_SSH_USER || 'ubuntu' }}
+        run: |
+          if ssh -i ~/.ssh/oracle -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+            "$ORACLE_SSH_USER@$ORACLE_HOST" true; then
+            exit 0
+          fi
+          echo "::error::SSH authentication failed. Check that ORACLE_SSH_USER matches the image (ubuntu for Ubuntu, opc for Oracle Linux) and that the matching public key is in that user's ~/.ssh/authorized_keys. Verbose handshake follows."
+          ssh -vv -i ~/.ssh/oracle -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+            "$ORACLE_SSH_USER@$ORACLE_HOST" true 2>&1 | sed -n '1,80p' || true
+          exit 1
+
       - name: Resolve image name
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -65,24 +118,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Configure SSH
-        env:
-          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
-          ORACLE_SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
-          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/oracle
-          chmod 600 ~/.ssh/oracle
-          if [ -n "$ORACLE_SSH_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$ORACLE_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "::warning::ORACLE_SSH_KNOWN_HOSTS is not set; trusting the host key on first use"
-            ssh-keyscan -T 15 "$ORACLE_HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
-          chmod 600 ~/.ssh/known_hosts
-
       - name: Deploy to instance
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -91,11 +126,11 @@ jobs:
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s\n' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/oracle -o BatchMode=yes -o ConnectTimeout=15 \
+          printf '%s\n' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/oracle -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
             "$ORACLE_SSH_USER@$ORACLE_HOST" \
             "docker login ghcr.io -u '$REGISTRY_USER' --password-stdin"
 
-          ssh -i ~/.ssh/oracle -o BatchMode=yes -o ConnectTimeout=15 \
+          ssh -i ~/.ssh/oracle -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
             "$ORACLE_SSH_USER@$ORACLE_HOST" \
             "IMAGE='$IMAGE' bash -s" <<'ENDSSH'
           set -euo pipefail
@@ -127,7 +162,7 @@ jobs:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_SSH_USER: ${{ secrets.ORACLE_SSH_USER || 'ubuntu' }}
         run: |
-          ssh -i ~/.ssh/oracle -o BatchMode=yes -o ConnectTimeout=15 \
+          ssh -i ~/.ssh/oracle -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
             "$ORACLE_SSH_USER@$ORACLE_HOST" bash -s <<'ENDSSH'
           set -euo pipefail
           for i in $(seq 1 30); do
@@ -161,6 +196,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Check required secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
