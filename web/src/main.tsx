@@ -12,7 +12,11 @@ if (container === null) {
   throw new Error("termchat: #root is missing from index.html");
 }
 
-const clients = createClients(createTransport({ baseUrl: window.location.origin }));
+const configuredApi = import.meta.env.VITE_API_BASE_URL?.trim();
+const apiBaseUrl =
+  configuredApi === undefined || configuredApi === "" ? window.location.origin : configuredApi;
+
+const clients = createClients(createTransport({ baseUrl: apiBaseUrl }));
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   globalThis.addEventListener("load", () => {
