@@ -1,0 +1,92 @@
+// There are no accounts here, so there is nothing to register, log in to, or refresh. A
+// session is a short-lived, revocable handle that exists only to say "this connection is
+// the one holding that nick". It confers no privileges and outlives nothing.
+syntax = "proto3";
+
+package chat.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Presence is derived from live stream subscriptions, never stored.
+enum Presence {
+  PRESENCE_UNSPECIFIED = 0;
+  // At least one live StreamEvents subscription.
+  PRESENCE_ACTIVE = 1;
+  // Connected but quiet past the idle threshold. Surfaces in the roster tag slot.
+  PRESENCE_IDLE = 2;
+}
+
+// Session is what the caller is allowed to know about its own session.
+//
+// The session id is deliberately absent. It lives in an httpOnly, HMAC-signed cookie
+// (AGENTS.md §8) and putting it on the wire would hand it to any script on the page for no
+// benefit — every RPC that needs it reads the cookie, and DMs address a nick, not an id.
+message Session {
+  // The nick currently held by this session. Empty only between Join and the first SetNick,
+  // which cannot happen today because Join claims one.
+  string nick = 1;
+  // When the session was created. Informational.
+  google.protobuf.Timestamp created_at = 2;
+  // When the session lapses if it sees no activity. The TTL slides, so this moves forward on
+  // every authenticated call.
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// Member is one nick present in a channel, as rendered in the ONLINE roster.
+//
+// There is no id: among connected sessions a nick is unique, so the nick *is* the key.
+// Whether a member is "you" is decided client-side by comparing against Session.nick.
+message Member {
+  string nick = 1;
+  Presence presence = 2;
+  // True while a SetTyping mark is unexpired. Presence and typing share the roster's single
+  // tag slot (design/README.md → Gaps).
+  bool typing = 3;
+  google.protobuf.Timestamp joined_at = 4;
+}
+
+message JoinRequest {
+  // Desired nick. Rejected with ERROR_REASON_NICK_TAKEN if another connected session already
+  // holds it — never silently suffixed.
+  string nick = 1;
+}
+
+message JoinResponse {
+  Session session = 1;
+}
+
+message SetNickRequest {
+  string nick = 1;
+}
+
+message SetNickResponse {
+  Session session = 1;
+}
+
+message GetSessionRequest {}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+message LeaveRequest {}
+
+message LeaveResponse {}
+
+// SessionService claims and releases a nick. That is the whole of identity here.
+service SessionService {
+  // Join claims a nick and issues the session cookie. It is the only method the session
+  // interceptor allows through unauthenticated (TASKS.md 3.4).
+  rpc Join(JoinRequest) returns (JoinResponse) {}
+
+  // SetNick changes the nick held by the current session, subject to the same collision rule
+  // as Join.
+  rpc SetNick(SetNickRequest) returns (SetNickResponse) {}
+
+  // GetSession echoes the caller's own session, and slides its TTL.
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse) {}
+
+  // Leave revokes the session server-side and releases the nick. The cookie is unusable
+  // afterwards.
+  rpc Leave(LeaveRequest) returns (LeaveResponse) {}
+}

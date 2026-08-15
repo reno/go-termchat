@@ -1,0 +1,324 @@
+// Channels, messages, and the single live event stream.
+//
+// Field numbers in this file are permanent. To remove a field, reserve it — never renumber
+// (AGENTS.md §5).
+syntax = "proto3";
+
+package chat.v1;
+
+import "chat/v1/session.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------------------
+// Entities
+// ---------------------------------------------------------------------------------------
+
+// MessageKind covers the four message variants the design renders, and nothing else
+// (design/README.md → Message variants).
+enum MessageKind {
+  MESSAGE_KIND_UNSPECIFIED = 0;
+  // Ordinary text. Nick in its hash colour.
+  MESSAGE_KIND_NORMAL = 1;
+  // Server-authored notice: joins, command errors, usage strings, offline and update lines.
+  // Clients may not send this kind.
+  MESSAGE_KIND_SYSTEM = 2;
+  // A /me action. The body is already rendered as "nick action" by the sender.
+  MESSAGE_KIND_ACTION = 3;
+  // A /msg direct message. Produced only by SendDirectMessage; never retained, never
+  // returned by ListMessages.
+  MESSAGE_KIND_DIRECT = 4;
+}
+
+// Channel is a room. Channels are created on demand by JoinChannel and reaped once they have
+// no members and no surviving messages (TASKS.md 2.3).
+message Channel {
+  // ULID. Stable for the life of the channel, which is not the life of the server.
+  string id = 1;
+  // Normalised display name, always "?"-prefixed: /join foo yields "?foo".
+  string name = 2;
+  // Connected members. Rendered right-aligned on the channel row, where 0 shows as an empty
+  // string rather than "0" (design/README.md → Layout).
+  uint32 member_count = 3;
+}
+
+// Message is one transcript line.
+//
+// created_at exists for ordering and stream resume only. The design renders no timestamps and
+// no day separators (TASKS.md → Deferred); do not add UI for it.
+message Message {
+  // ULID assigned by the server. Monotonic, so lexical order is chronological order.
+  string id = 1;
+  // ULID minted by the client before dispatch. The server upserts on
+  // (channel_id, client_message_id), which is what makes the offline outbox safe to retry
+  // (AGENTS.md §5). Empty for server-authored messages.
+  string client_message_id = 2;
+  // Empty for a direct message, which belongs to no channel.
+  string channel_id = 3;
+  // Display name at the time of writing. Nicks are released on disconnect and reusable, so
+  // this is a label, never an identity (AGENTS.md §8).
+  string author_nick = 4;
+  string body = 5;
+  MessageKind kind = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+// Cursor is an opaque pagination token. Its encoding is a server implementation detail and
+// clients must round-trip it verbatim.
+message Cursor {
+  string value = 1;
+}
+
+// ErrorReason is the machine-readable half of a failure. The human-readable half is the
+// connect.Error message; the connect.Code carries the class.
+enum ErrorReason {
+  ERROR_REASON_UNSPECIFIED = 0;
+  // Another connected session holds that nick.
+  ERROR_REASON_NICK_TAKEN = 1;
+  // Nick fails the length or charset rule.
+  ERROR_REASON_NICK_INVALID = 2;
+  // Channel name fails the length or charset rule.
+  ERROR_REASON_CHANNEL_NAME_INVALID = 3;
+  // Body exceeds the configured cap; see ErrorDetail.limit.
+  ERROR_REASON_BODY_TOO_LONG = 4;
+  // Body is empty or whitespace only.
+  ERROR_REASON_BODY_EMPTY = 5;
+  // Caller is not a member of the channel it named.
+  ERROR_REASON_NOT_A_MEMBER = 6;
+  // No such channel, or it was reaped.
+  ERROR_REASON_CHANNEL_NOT_FOUND = 7;
+  // Per-session send rate exceeded; see ErrorDetail.retry_after.
+  ERROR_REASON_RATE_LIMITED = 8;
+  // Session lapsed or was revoked by Leave.
+  ERROR_REASON_SESSION_EXPIRED = 9;
+  // The DM target holds no connected session. DMs are not queued.
+  ERROR_REASON_RECIPIENT_OFFLINE = 10;
+  // Cursor is malformed or was not minted by this server process.
+  ERROR_REASON_CURSOR_INVALID = 11;
+  // Resume asked for events that retention has already dropped.
+  ERROR_REASON_EVENTS_EVICTED = 12;
+  // Caller sent a MessageKind it is not allowed to author. SYSTEM is server-authored and
+  // DIRECT belongs to SendDirectMessage.
+  ERROR_REASON_MESSAGE_KIND_INVALID = 13;
+  // client_message_id is missing or is not a ULID. This one is aimed at the client's own
+  // outbox rather than at anything the user typed.
+  ERROR_REASON_CLIENT_MESSAGE_ID_INVALID = 14;
+}
+
+// ErrorDetail is attached to a connect.Error as an error detail. Failures are never encoded
+// in a success response (AGENTS.md §5).
+//
+// It must never carry message bodies, nicks, or session ids — the same rule that applies to
+// log lines and metric labels applies here (AGENTS.md §8).
+message ErrorDetail {
+  ErrorReason reason = 1;
+  // Name of the offending request field, when one is to blame. A field name, not its value.
+  string field = 2;
+  // The cap that was exceeded, for the limit-shaped reasons.
+  uint32 limit = 3;
+  // How long to wait before retrying, for ERROR_REASON_RATE_LIMITED.
+  google.protobuf.Duration retry_after = 4;
+}
+
+// ---------------------------------------------------------------------------------------
+// Unary requests and responses
+// ---------------------------------------------------------------------------------------
+
+message ListChannelsRequest {}
+
+message ListChannelsResponse {
+  repeated Channel channels = 1;
+}
+
+message JoinChannelRequest {
+  // Accepted with or without the "?" prefix; the server normalises. /join foo => "?foo".
+  string name = 1;
+}
+
+message JoinChannelResponse {
+  Channel channel = 1;
+  // True when this call brought the channel into existence, which is also what seeds the
+  // "<name> — you created this channel." system line (design/README.md → Behaviour).
+  bool created = 2;
+}
+
+message LeaveChannelRequest {
+  string channel_id = 1;
+}
+
+message LeaveChannelResponse {}
+
+message ListMembersRequest {
+  string channel_id = 1;
+}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+}
+
+message ListMessagesRequest {
+  string channel_id = 1;
+  // Server-capped. Zero means the server's default.
+  uint32 page_size = 2;
+  // Omit for the first page. Paging walks backwards in time from newest.
+  Cursor cursor = 3;
+}
+
+message ListMessagesResponse {
+  // Newest first.
+  repeated Message messages = 1;
+  // Absent when the caller has reached the oldest surviving message.
+  Cursor next_cursor = 2;
+  // True when retention evicted messages older than this page — the history ends here
+  // because it was forgotten, not because it began here. The client says so rather than
+  // showing a silent hole.
+  bool window_truncated = 3;
+}
+
+message SendMessageRequest {
+  string channel_id = 1;
+  // ULID minted by the client. Required: it is the idempotency key (AGENTS.md §5).
+  string client_message_id = 2;
+  string body = 3;
+  // MESSAGE_KIND_NORMAL or MESSAGE_KIND_ACTION only. SYSTEM is server-authored and DIRECT
+  // belongs to SendDirectMessage; both are rejected here.
+  MessageKind kind = 4;
+}
+
+message SendMessageResponse {
+  Message message = 1;
+  // True when this client_message_id had already been accepted and the stored message is
+  // being returned unchanged. A retried outbox entry is a success, not a duplicate.
+  bool deduplicated = 2;
+}
+
+message SendDirectMessageRequest {
+  string client_message_id = 1;
+  string recipient_nick = 2;
+  string body = 3;
+}
+
+message SendDirectMessageResponse {
+  Message message = 1;
+  // False when the recipient holds no connected session. DMs are hub-routed and never
+  // retained, so an undelivered DM is dropped and the sender is told with a system line.
+  bool delivered = 2;
+}
+
+message SetTypingRequest {
+  string channel_id = 1;
+  bool typing = 2;
+}
+
+message SetTypingResponse {}
+
+// ---------------------------------------------------------------------------------------
+// The event stream
+// ---------------------------------------------------------------------------------------
+
+message MessageCreated {
+  Message message = 1;
+}
+
+message DirectMessage {
+  Message message = 1;
+  // Present so the sender's own client can file its copy under the right conversation.
+  string recipient_nick = 2;
+}
+
+message MemberJoined {
+  string channel_id = 1;
+  Member member = 2;
+}
+
+message MemberLeft {
+  string channel_id = 1;
+  string nick = 2;
+}
+
+message TypingChanged {
+  string channel_id = 1;
+  string nick = 2;
+  // Falls back to false on its own after a short server-side TTL; clients do not have to
+  // time it out themselves.
+  bool typing = 3;
+}
+
+message PresenceChanged {
+  string nick = 1;
+  Presence presence = 2;
+}
+
+// Event is the single envelope carried by StreamEvents.
+message Event {
+  // ULID. Monotonic per server process, and the value clients hand back as
+  // StreamEventsRequest.last_event_id to resume.
+  string event_id = 1;
+  google.protobuf.Timestamp emitted_at = 2;
+
+  oneof payload {
+    MessageCreated message_created = 3;
+    DirectMessage direct_message = 4;
+    MemberJoined member_joined = 5;
+    MemberLeft member_left = 6;
+    TypingChanged typing_changed = 7;
+    PresenceChanged presence_changed = 8;
+  }
+
+  // message_edited and message_deleted. The design has no edit or delete affordance so they
+  // are deferred (TASKS.md → Deferred), but field numbers are permanent, so the slots are
+  // claimed now rather than renumbered later. To implement, un-reserve and add to the oneof.
+  reserved 9, 10;
+  reserved "message_edited", "message_deleted";
+}
+
+message StreamEventsRequest {
+  // The event_id of the last event this client processed. Omit on a fresh connection. The
+  // server replays whatever of the retained window was missed and then goes live; anything
+  // retention already dropped is gone, and the client is told with a system line rather than
+  // silently given a hole (TASKS.md 5.5).
+  string last_event_id = 1;
+}
+
+// StreamEventsResponse is one frame of the live stream.
+//
+// It exists as a thin wrapper so that every RPC in the schema returns its own XxxResponse
+// (AGENTS.md §5) and buf's RPC_RESPONSE_STANDARD_NAME rule stays satisfied without a lint
+// suppression, while Event itself keeps the name both AGENTS.md and TASKS.md give it.
+//
+// A frame with no event set is a keepalive. Clients must ignore it rather than treat it as a
+// malformed frame — it exists to keep intermediaries from reaping an idle stream.
+message StreamEventsResponse {
+  Event event = 1;
+}
+
+// ChatService carries every chat operation.
+//
+// Browsers cannot do full-duplex HTTP/2, so writes are unary and live reads are the one
+// server-streaming RPC below, multiplexed by Event.payload. Do not add a second stream
+// (AGENTS.md §5).
+service ChatService {
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse) {}
+
+  // JoinChannel creates the channel if it does not exist.
+  rpc JoinChannel(JoinChannelRequest) returns (JoinChannelResponse) {}
+
+  rpc LeaveChannel(LeaveChannelRequest) returns (LeaveChannelResponse) {}
+
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse) {}
+
+  // ListMessages pages the retained window only. There is no archive behind it.
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {}
+
+  // SendMessage is idempotent on (channel_id, client_message_id).
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {}
+
+  // SendDirectMessage routes through the hub to the recipient's connected sessions only.
+  // Nothing is retained and no one else sees it.
+  rpc SendDirectMessage(SendDirectMessageRequest) returns (SendDirectMessageResponse) {}
+
+  rpc SetTyping(SetTypingRequest) returns (SetTypingResponse) {}
+
+  // StreamEvents is the only streaming RPC in the schema.
+  rpc StreamEvents(StreamEventsRequest) returns (stream StreamEventsResponse) {}
+}

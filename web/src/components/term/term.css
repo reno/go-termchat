@@ -1,0 +1,119 @@
+.term-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.term-pane[data-scroll="true"] {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.term-line {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--gap-msg-cols);
+  align-items: baseline;
+  word-break: break-word;
+}
+
+.term-line__nick {
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.term-line__body {
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+.term-line[data-variant="normal"] .term-line__body {
+  color: var(--fg);
+}
+
+.term-line[data-variant="system"] .term-line__nick {
+  color: var(--fg-dim-content);
+  font-weight: var(--fw-bold);
+}
+
+.term-line[data-variant="system"] .term-line__body {
+  color: var(--fg-system-content);
+}
+
+.term-line[data-variant="action"] .term-line__nick {
+  color: var(--fg-dim-content);
+}
+
+.term-line[data-variant="action"] .term-line__body {
+  color: var(--fg-action);
+  font-style: italic;
+}
+
+.term-line[data-variant="dm"] .term-line__nick {
+  color: var(--dm-nick);
+}
+
+.term-line[data-variant="dm"] .term-line__body {
+  color: var(--dm-body);
+}
+
+.term-line[data-state="pending"] .term-line__body {
+  color: var(--fg-system-content);
+}
+
+.term-line[data-state="failed"] .term-line__body {
+  color: var(--nick-5);
+}
+
+.term-prompt {
+  color: var(--accent);
+  font-weight: var(--fw-bold);
+  padding-top: var(--pad-prompt-top);
+  user-select: none;
+}
+
+.term-caret {
+  display: inline-block;
+  width: 1ch;
+  background: var(--accent);
+  color: var(--accent-on);
+  animation: term-blink 1s step-end infinite;
+}
+
+@keyframes term-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-caret {
+    animation: none;
+  }
+}
+
+.term-status {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-header);
+  padding: var(--pad-header);
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.term-spinner {
+  color: var(--fg-muted);
+  user-select: none;
+}
+
+.term-badge {
+  font-size: var(--fs-100);
+  color: var(--fg-faint-content);
+}
+
+.term-badge[data-on-raised="true"] {
+  color: var(--fg-faint-content-raised);
+}

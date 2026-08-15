@@ -1,0 +1,25 @@
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app__nick {
+  color: var(--accent);
+  font-weight: var(--fw-bold);
+}
+
+.app__tagline {
+  margin-left: auto;
+  color: var(--fg-dim-content);
+  font-size: var(--fs-200);
+}
+
+.app-booting {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pad-transcript);
+}

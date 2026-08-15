@@ -1,0 +1,124 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - revive
+    - sloglint
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    exhaustive:
+      default-signifies-exhaustive: false
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^fmt\.Print.*$'
+          msg: use log/slog, not stdout
+        - pattern: '^print(ln)?$'
+          msg: use log/slog, not the builtin print
+        - pattern: '^log\.(Print|Fatal|Panic).*$'
+          msg: use log/slog, not the legacy log package
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    revive:
+      rules:
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+        - name: var-naming
+
+    sloglint:
+      no-global: all
+      context: scope
+      static-msg: true
+      key-naming-case: snake
+      forbidden-keys:
+        - session_id
+        - nick
+        - body
+        - message
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - gen/
+    rules:
+      - path: _test\.go$
+        linters:
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/reno/go-termchat
+  exclusions:
+    generated: lax
+    paths:
+      - gen/
