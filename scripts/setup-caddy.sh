@@ -9,7 +9,8 @@ NC='\033[0m'
 CADDY_DIR="${CADDY_DIR:-$HOME/caddy}"
 UPSTREAM="${TERMCHAT_UPSTREAM:-127.0.0.1:8080}"
 
-echo "🔐 Setting up Caddy with nip.io"
+echo "🔐 Setting up Caddy"
+echo "   Override the hostname with:  DOMAIN=chat.example.com $0"
 echo ""
 
 if ! docker info > /dev/null 2>&1; then
@@ -36,15 +37,31 @@ if [[ ! "$PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
     exit 1
 fi
 
-NIP_HOST="${PUBLIC_IP}.nip.io"
+SITE_HOST="${DOMAIN:-${PUBLIC_IP}.nip.io}"
 
 echo "🌐 Public IP: $PUBLIC_IP"
-echo "🌐 Hostname:  $NIP_HOST"
+echo "🌐 Hostname:  $SITE_HOST"
 echo ""
 
-if ! getent hosts "$NIP_HOST" > /dev/null 2>&1; then
-    echo -e "${YELLOW}⚠️  $NIP_HOST does not resolve from this host.${NC}"
-    echo "   Continuing anyway; Let's Encrypt resolves it independently."
+RESOLVED=$(getent hosts "$SITE_HOST" 2>/dev/null | awk '{print $1}' | head -1 || true)
+
+if [ -z "$RESOLVED" ]; then
+    echo -e "${YELLOW}⚠️  $SITE_HOST does not resolve from this host.${NC}"
+    echo "   If you just created the DNS record, give it a minute."
+    echo ""
+elif [ "$RESOLVED" != "$PUBLIC_IP" ]; then
+    echo -e "${RED}❌ $SITE_HOST resolves to $RESOLVED, not $PUBLIC_IP.${NC}"
+    echo ""
+    echo "   With Cloudflare this almost always means the record is proxied"
+    echo "   (orange cloud) and you are seeing a Cloudflare edge address."
+    echo "   Set the record to DNS only (grey cloud): Caddy needs to answer"
+    echo "   the HTTP-01 challenge on your origin directly."
+    echo ""
+    if [ "${SKIP_DNS_CHECK:-0}" != "1" ]; then
+        echo "   Override if this is deliberate:  SKIP_DNS_CHECK=1 $0"
+        exit 1
+    fi
+    echo -e "${YELLOW}   SKIP_DNS_CHECK=1 is set; continuing anyway.${NC}"
     echo ""
 fi
 
@@ -53,7 +70,7 @@ mkdir -p "$CADDY_DIR"
 cd "$CADDY_DIR"
 
 cat > Caddyfile <<EOF
-$NIP_HOST {
+$SITE_HOST {
     reverse_proxy $UPSTREAM
 }
 EOF
@@ -82,21 +99,13 @@ echo "⏳ Waiting for the certificate (up to 90s)..."
 
 for _ in $(seq 1 45); do
     CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
-        "https://$NIP_HOST/healthz" 2>/dev/null || echo 000)
+        "https://$SITE_HOST/healthz" 2>/dev/null || echo 000)
 
     if [ "$CODE" = "200" ]; then
-        echo -e "${GREEN}✅ HTTPS is live: https://$NIP_HOST${NC}"
+        echo -e "${GREEN}✅ HTTPS is live: https://$SITE_HOST${NC}"
         echo ""
-        echo "📋 Next steps:"
-        echo ""
-        echo "1. Point the frontend at it:"
-        echo "   gh secret set VITE_API_BASE_URL --body https://$NIP_HOST"
-        echo ""
-        echo "2. Allow it as a CORS origin:"
-        echo "   sed -i 's|^TERMCHAT_CORS_ORIGINS=.*|TERMCHAT_CORS_ORIGINS=https://$NIP_HOST|' ~/termchat/.env"
-        echo "   sudo systemctl restart termchat"
-        echo ""
-        echo "The instance also serves the PWA itself, so https://$NIP_HOST is the whole app."
+        echo "The binary embeds the PWA, so that URL is the whole app — served"
+        echo "same-origin, which is why TERMCHAT_CORS_ORIGINS stays empty."
         exit 0
     fi
 
