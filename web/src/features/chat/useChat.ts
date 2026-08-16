@@ -21,7 +21,7 @@ import { useChatStore } from "./store";
 
 import { MessageKind as ProtoKind } from "@gen/chat/v1/chat_pb";
 
-export const DEFAULT_CHANNEL = "?teste";
+export const DEFAULT_CHANNEL = "?home";
 export const SEND_FAILED = "message failed to send. press up and send it again.";
 export const DM_UNDELIVERED = "not delivered — that nick is not connected.";
 export const WINDOW_TRUNCATED = "[older messages were forgotten]";

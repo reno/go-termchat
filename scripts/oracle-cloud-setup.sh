@@ -35,38 +35,62 @@ APP_USER="$(id -un)"
 echo "📦 Image: ${PRETTY_NAME:-unknown} (user: $APP_USER)"
 echo ""
 
-echo "📦 Updating system packages..."
-sudo dnf -y upgrade --refresh
+log() {
+    echo ""
+    echo "[$(date -u +%H:%M:%S)] $*"
+}
 
-echo "🔧 Installing dnf plugins..."
-sudo dnf -y install dnf-plugins-core
+dnf_do() {
+    sudo dnf -y "$@" < /dev/null
+}
 
-echo "🐳 Installing Docker Engine..."
+log "💾 Checking swap..."
+MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+SWAP_KB=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
+if [ "$SWAP_KB" -eq 0 ] && [ "$MEM_KB" -lt 2097152 ]; then
+    echo "   $((MEM_KB / 1024)) MB RAM, no swap: creating a 2G swapfile so dnf is not OOM-killed"
+    if [ ! -f /swapfile ]; then
+        sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    fi
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile > /dev/null
+    sudo swapon /swapfile
+    if ! grep -q '^/swapfile ' /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
+    fi
+    echo -e "${GREEN}✅ Swap enabled${NC}"
+else
+    echo -e "${GREEN}✅ $((MEM_KB / 1024)) MB RAM, $((SWAP_KB / 1024)) MB swap${NC}"
+fi
+
+log "📦 Refreshing package metadata..."
+dnf_do makecache
+
+if [ "${TERMCHAT_SYSTEM_UPGRADE:-0}" = "1" ]; then
+    log "📦 Upgrading system packages (30+ minutes on a micro shape)..."
+    dnf_do upgrade --refresh
+else
+    echo -e "${YELLOW}⚠️  Skipping full system upgrade. Re-run with TERMCHAT_SYSTEM_UPGRADE=1 to include it.${NC}"
+fi
+
+log "🔧 Installing dnf plugins..."
+dnf_do install dnf-plugins-core
+
+log "🐳 Installing Docker Engine..."
 if command -v docker &> /dev/null; then
     echo -e "${GREEN}✅ Docker already installed${NC}"
 else
-    sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-    sudo dnf -y install --allowerasing docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    dnf_do config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    dnf_do install --allowerasing docker-ce docker-ce-cli containerd.io docker-compose-plugin
     echo -e "${GREEN}✅ Docker installed${NC}"
 fi
 
+log "🐳 Enabling Docker..."
 sudo systemctl enable --now docker
 sudo usermod -aG docker "$APP_USER"
 
-echo "🔐 Installing Caddy (for HTTPS)..."
-if command -v caddy &> /dev/null; then
-    echo -e "${GREEN}✅ Caddy already installed${NC}"
-elif sudo dnf -y install 'dnf-command(copr)' \
-    && sudo dnf -y copr enable @caddy/caddy \
-    && sudo dnf -y install caddy; then
-    echo -e "${GREEN}✅ Caddy installed${NC}"
-else
-    echo -e "${YELLOW}⚠️  Caddy install failed; continuing without it.${NC}"
-    echo -e "${YELLOW}   HTTPS is a follow-up step, not required to boot termchat.${NC}"
-fi
-
-echo "🔥 Configuring firewalld..."
-sudo dnf -y install firewalld
+log "🔥 Configuring firewalld..."
+dnf_do install firewalld
 sudo systemctl enable --now firewalld
 sudo firewall-cmd --permanent --add-service=ssh
 sudo firewall-cmd --permanent --add-service=http
@@ -115,11 +139,13 @@ EOF
 
 echo "📝 Creating .env file..."
 echo "TERMCHAT_SESSION_KEY=$SESSION_KEY" > .env
-echo "TERMCHAT_CORS_ORIGINS=https://termchat.pages.dev" >> .env
+echo "TERMCHAT_CORS_ORIGINS=" >> .env
 chmod 600 .env
 
 echo ""
-echo -e "${YELLOW}⚠️  IMPORTANT: Update TERMCHAT_CORS_ORIGINS in .env with your actual Cloudflare Pages URL${NC}"
+echo -e "${YELLOW}⚠️  TERMCHAT_CORS_ORIGINS is empty on purpose.${NC}"
+echo "   The binary embeds the PWA, so the app is served same-origin and CORS"
+echo "   is never exercised. Only set it if you host the frontend elsewhere."
 echo ""
 
 echo "⚙️  Creating systemd service..."
@@ -154,18 +180,15 @@ echo "   so CI deploys are unaffected."
 echo ""
 echo "📋 Next steps:"
 echo ""
-echo "1. Edit .env to set your Cloudflare Pages URL:"
-echo "   nano ~/termchat/.env"
-echo ""
-echo "2. Start the service:"
+echo "1. Start the service:"
 echo "   sudo systemctl start termchat"
 echo ""
-echo "3. Check status:"
+echo "2. Check status:"
 echo "   docker compose ps"
 echo "   curl http://localhost:8080/healthz"
 echo ""
-echo "4. (Optional) Configure Caddy for HTTPS:"
-echo "   See: docs/cloudflare-deployment.md#configure-caddy"
+echo "3. Put HTTPS in front of it:"
+echo "   bash scripts/setup-caddy.sh"
 echo ""
 echo "🔐 Your generated session key is in ~/termchat/.env"
 echo "   Keep it secret!"
