@@ -7,8 +7,9 @@ import { clearCache, saveChannels } from "@/lib/db";
 
 import { Chat } from "./Chat";
 import { useChatStore } from "./store";
+import { DEFAULT_CHANNEL } from "./useChat";
 
-const ids: Record<string, string> = { "?teste": "c1", "?general": "c2", "?other": "c3" };
+const ids: Record<string, string> = { [DEFAULT_CHANNEL]: "c1", "?general": "c2", "?other": "c3" };
 
 function stubClients(known: string[] = Object.keys(ids)): SessionClients {
   const joinChannel = vi.fn(({ name }: { name: string }) => {
@@ -66,7 +67,7 @@ describe("channel in the query string", () => {
     await waitFor(() => {
       expect(joinedNames(clients)).toContain("?general");
     });
-    expect(joinedNames(clients)).not.toContain("?teste");
+    expect(joinedNames(clients)).not.toContain(DEFAULT_CHANNEL);
     await waitFor(() => {
       expect(useChatStore.getState().activeId).toBe("c2");
     });
@@ -77,28 +78,28 @@ describe("channel in the query string", () => {
     render(<Chat clients={stubClients()} me="rill" onLeave={vi.fn()} />);
 
     await waitFor(() => {
-      expect(globalThis.location.search).toBe("?teste");
+      expect(globalThis.location.search).toBe(DEFAULT_CHANNEL);
     });
   });
 
   it("falls back to the default channel when the keyword is not joinable", async () => {
     visit("?nope");
-    const clients = stubClients(["?teste"]);
+    const clients = stubClients([DEFAULT_CHANNEL]);
 
     render(<Chat clients={clients} me="rill" onLeave={vi.fn()} />);
 
     await waitFor(() => {
       expect(useChatStore.getState().activeId).toBe("c1");
     });
-    expect(joinedNames(clients)).toEqual(["?nope", "?teste"]);
+    expect(joinedNames(clients)).toEqual(["?nope", DEFAULT_CHANNEL]);
     await waitFor(() => {
-      expect(globalThis.location.search).toBe("?teste");
+      expect(globalThis.location.search).toBe(DEFAULT_CHANNEL);
     });
   });
 
   it("reflects a channel switch in the query string", async () => {
     await saveChannels([
-      { id: "c1", name: "?teste", memberCount: 1 },
+      { id: "c1", name: DEFAULT_CHANNEL, memberCount: 1 },
       { id: "c3", name: "?other", memberCount: 1 },
     ]);
     const user = userEvent.setup();
@@ -106,7 +107,7 @@ describe("channel in the query string", () => {
     render(<Chat clients={stubClients()} me="rill" onLeave={vi.fn()} />);
 
     await waitFor(() => {
-      expect(globalThis.location.search).toBe("?teste");
+      expect(globalThis.location.search).toBe(DEFAULT_CHANNEL);
     });
 
     await user.click(screen.getByText("?other"));
@@ -119,7 +120,7 @@ describe("channel in the query string", () => {
 
   it("follows the back button to the previous channel", async () => {
     await saveChannels([
-      { id: "c1", name: "?teste", memberCount: 1 },
+      { id: "c1", name: DEFAULT_CHANNEL, memberCount: 1 },
       { id: "c3", name: "?other", memberCount: 1 },
     ]);
     const user = userEvent.setup();
@@ -127,7 +128,7 @@ describe("channel in the query string", () => {
     render(<Chat clients={stubClients()} me="rill" onLeave={vi.fn()} />);
 
     await waitFor(() => {
-      expect(globalThis.location.search).toBe("?teste");
+      expect(globalThis.location.search).toBe(DEFAULT_CHANNEL);
     });
     await user.click(screen.getByText("?other"));
     await waitFor(() => {
@@ -137,7 +138,7 @@ describe("channel in the query string", () => {
     globalThis.history.back();
 
     await waitFor(() => {
-      expect(globalThis.location.search).toBe("?teste");
+      expect(globalThis.location.search).toBe(DEFAULT_CHANNEL);
     });
     await waitFor(() => {
       expect(useChatStore.getState().activeId).toBe("c1");

@@ -5,17 +5,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      deploy_backend:
-        description: 'Deploy backend to Oracle Cloud'
-        required: false
-        type: boolean
-        default: true
-      deploy_frontend:
-        description: 'Deploy frontend to Cloudflare Pages'
-        required: false
-        type: boolean
-        default: true
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -24,15 +13,11 @@ concurrency:
 permissions:
   contents: read
   packages: write
-  deployments: write
 
 jobs:
   deploy-backend:
     name: Deploy Backend to Oracle Cloud
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && inputs.deploy_backend)
 
     steps:
       - name: Checkout
@@ -218,62 +203,10 @@ jobs:
         if: always()
         run: rm -f ~/.ssh/oracle
 
-  deploy-frontend:
-    name: Deploy Frontend to Cloudflare Pages
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && inputs.deploy_frontend)
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Check required secrets
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          missing=()
-          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN)
-          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::missing repository secrets: ${missing[*]}"
-            exit 1
-          fi
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-
-      - name: Enable Corepack
-        run: corepack enable pnpm
-
-      - name: Install dependencies
-        working-directory: ./web
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        working-directory: ./web
-        env:
-          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || format('http://{0}:8080', secrets.ORACLE_HOST) }}
-        run: pnpm run build
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: termchat
-          directory: web/dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-
   notify:
     name: Notify Deployment
     runs-on: ubuntu-latest
-    needs: [deploy-backend, deploy-frontend]
+    needs: [deploy-backend]
     if: always()
 
     steps:
@@ -282,6 +215,5 @@ jobs:
           echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Backend (Oracle Cloud): ${{ needs.deploy-backend.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "### Frontend (Cloudflare Pages): ${{ needs.deploy-frontend.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployment completed at $(date)" >> $GITHUB_STEP_SUMMARY
